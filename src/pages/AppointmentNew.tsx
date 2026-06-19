@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search,
   Plus,
@@ -17,6 +17,9 @@ import {
   X,
   Bell,
   ChevronDown,
+  Zap,
+  History,
+  StickyNote,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
@@ -75,11 +78,13 @@ function Avatar({ name, className }: { name: string; className?: string }) {
 
 export default function AppointmentNew() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const members = useAppStore((s) => s.members);
   const pets = useAppStore((s) => s.pets);
   const services = useAppStore((s) => s.services);
   const groomers = useAppStore((s) => s.groomers);
   const appointments = useAppStore((s) => s.appointments);
+  const followUpRecords = useAppStore((s) => s.followUpRecords);
   const createAppointment = useAppStore((s) => s.createAppointment);
   const checkConflict = useAppStore((s) => s.checkConflict);
   const createMember = useAppStore((s) => s.createMember);
@@ -89,6 +94,52 @@ export default function AppointmentNew() {
   useEffect(() => {
     initData();
   }, [initData]);
+
+  useEffect(() => {
+    const quickReorder = searchParams.get('quickReorder');
+    const petId = searchParams.get('petId');
+    const serviceId = searchParams.get('serviceId');
+    const groomerId = searchParams.get('groomerId');
+
+    if (quickReorder === '1' && petId && serviceId && groomerId) {
+      const pet = pets.find((p) => p.id === petId);
+      const service = services.find((s) => s.id === serviceId);
+      const groomer = groomers.find((g) => g.id === groomerId);
+
+      if (pet && service && groomer) {
+        const member = members.find((m) => m.id === pet.memberId);
+        if (member) {
+          setSelectedMember(member);
+          setSelectedPet(pet);
+          setSelectedService(service);
+          setSelectedGroomer(groomer);
+          setDirection(1);
+          setStep(4);
+        }
+      }
+    }
+  }, [searchParams, pets, services, groomers, members]);
+
+  const handleQuickReorderSelect = (pet: Pet) => {
+    const lastApt = getPetLastAppointment(pet.id);
+    if (!lastApt) return;
+
+    const service = services.find((s) => s.id === lastApt.serviceId);
+    const groomer = groomers.find((g) => g.id === lastApt.groomerId);
+    const member = members.find((m) => m.id === pet.memberId);
+
+    if (service && groomer && member) {
+      setSelectedMember(member);
+      setSelectedPet(pet);
+      setSelectedService(service);
+      setSelectedGroomer(groomer);
+      setShowQuickReorderModal(false);
+      setQuickReorderSelectedMember(null);
+      setQuickReorderSearch('');
+      setDirection(1);
+      setStep(4);
+    }
+  };
 
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState(1);
@@ -114,6 +165,9 @@ export default function AppointmentNew() {
   const [toast, setToast] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [careReminderExpanded, setCareReminderExpanded] = useState(false);
+  const [showQuickReorderModal, setShowQuickReorderModal] = useState(false);
+  const [quickReorderSearch, setQuickReorderSearch] = useState('');
+  const [quickReorderSelectedMember, setQuickReorderSelectedMember] = useState<Member | null>(null);
 
   const filteredMembers = useMemo(() => {
     if (!search.trim()) return members;
@@ -127,6 +181,33 @@ export default function AppointmentNew() {
     () => pets.filter((p) => p.memberId === selectedMember?.id),
     [pets, selectedMember],
   );
+
+  const getPetLastAppointment = (petId: string) => {
+    const petAppointments = appointments
+      .filter((a) => a.petId === petId && a.status !== 'cancelled')
+      .sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
+    return petAppointments[0] || null;
+  };
+
+  const getPetLastFollowUp = (petId: string) => {
+    const petFollowUps = followUpRecords
+      .filter((f) => f.petId === petId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return petFollowUps[0] || null;
+  };
+
+  const quickReorderFilteredMembers = useMemo(() => {
+    if (!quickReorderSearch.trim()) return members;
+    const s = quickReorderSearch.toLowerCase();
+    return members.filter(
+      (m) => m.name.toLowerCase().includes(s) || m.phone.includes(quickReorderSearch),
+    );
+  }, [members, quickReorderSearch]);
+
+  const quickReorderMemberPets = useMemo(() => {
+    if (!quickReorderSelectedMember) return [];
+    return pets.filter((p) => p.memberId === quickReorderSelectedMember.id);
+  }, [pets, quickReorderSelectedMember]);
 
   const servicesByCategory = useMemo(() => {
     const map = new Map<string, Service[]>();
@@ -270,8 +351,12 @@ export default function AppointmentNew() {
     setSubmitting(false);
     if (result.success && result.id) {
       setToast('预约创建成功，即将进入详情...');
+      const fromParam = searchParams.get('from');
       setTimeout(() => {
-        navigate(`/appointments/${result.id}`);
+        const targetUrl = fromParam
+          ? `/appointments/${result.id}?from=${fromParam}`
+          : `/appointments/${result.id}`;
+        navigate(targetUrl);
       }, 800);
     } else if (result.conflict) {
       setConflictStatus('conflict');
@@ -347,6 +432,25 @@ export default function AppointmentNew() {
             >
               {step === 1 && (
                 <div>
+                  <div className="mb-5 p-4 bg-gradient-to-r from-terracotta-50 to-petal-50 rounded-2xl border border-terracotta-200 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-terracotta-100 flex items-center justify-center">
+                        <Zap className="w-5 h-5 text-terracotta-500" />
+                      </div>
+                      <div>
+                        <div className="font-semibold text-terracotta-700 text-sm">老客户再次预约？试试快速复购 👉</div>
+                        <div className="text-xs text-terracotta-500/70">一键选择上次服务方案，只需改时间</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowQuickReorderModal(true)}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-terracotta-500 text-white text-sm font-medium hover:bg-terracotta-600 transition-colors shadow-soft"
+                    >
+                      <History className="w-4 h-4" />
+                      选择上次服务
+                    </button>
+                  </div>
+
                   <h2 className="text-lg font-semibold text-sage-700 mb-4 flex items-center gap-2">
                     <UserPlus className="w-5 h-5 text-sage-500" />
                     选择客户
@@ -988,10 +1092,41 @@ export default function AppointmentNew() {
                     <textarea
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      rows={3}
+                      rows={4}
                       placeholder="选填：特殊需求、注意事项等"
                       className="w-full px-4 py-3 rounded-xl bg-cream-50 border border-sage-200 text-sm text-sage-700 placeholder-sage-400 focus:outline-none focus:ring-2 focus:ring-sage-400/50 focus:border-sage-400 resize-none"
                     />
+                    <div className="mt-2 flex items-center justify-between">
+                      {selectedPet && getPetLastFollowUp(selectedPet.id) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const followUp = getPetLastFollowUp(selectedPet.id);
+                            if (followUp) {
+                              const refText = `【上次护理参考】\n宠物状态：${followUp.petCondition}\n客户反馈：${followUp.customerFeedback}`;
+                              setNotes(refText);
+                            }
+                          }}
+                          className="flex items-center gap-1 text-xs text-sage-500 hover:text-terracotta-500 font-medium transition-colors"
+                        >
+                          <StickyNote className="w-3.5 h-3.5" />
+                          📝 引用上次护理备注
+                        </button>
+                      )}
+                      {selectedPet && getPetLastFollowUp(selectedPet.id) && (
+                        <div className="text-xs text-sage-400">
+                          上次护理：{format(new Date(getPetLastFollowUp(selectedPet.id)!.createdAt), 'yyyy-MM-dd')}
+                        </div>
+                      )}
+                    </div>
+                    {selectedPet && getPetLastFollowUp(selectedPet.id) && notes === '' && (
+                      <div className="mt-2 p-3 bg-sage-50 border border-sage-100 rounded-xl">
+                        <div className="text-xs text-sage-400 mb-1">上次护理摘要：</div>
+                        <p className="text-xs text-sage-500 line-clamp-2">
+                          {getPetLastFollowUp(selectedPet.id)!.petCondition}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1087,6 +1222,177 @@ export default function AppointmentNew() {
                   创建
                 </button>
               </div>
+            </div>
+          </Modal>
+        )}
+
+        {showQuickReorderModal && (
+          <Modal
+            title="快速复购 - 选择上次服务"
+            onClose={() => {
+              setShowQuickReorderModal(false);
+              setQuickReorderSelectedMember(null);
+              setQuickReorderSearch('');
+            }}
+          >
+            <div className="space-y-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sage-400" />
+                <input
+                  type="text"
+                  value={quickReorderSearch}
+                  onChange={(e) => setQuickReorderSearch(e.target.value)}
+                  placeholder="搜索会员名或手机号..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-cream-50 border border-sage-200 text-sm text-sage-700 placeholder-sage-400 focus:outline-none focus:ring-2 focus:ring-sage-400/50 focus:border-sage-400"
+                />
+              </div>
+
+              {!quickReorderSelectedMember ? (
+                <div className="space-y-2 max-h-80 overflow-y-auto">
+                  {quickReorderFilteredMembers.length === 0 ? (
+                    <div className="py-8 text-center">
+                      <UserPlus className="w-10 h-10 mx-auto text-sage-300 mb-2" />
+                      <p className="text-sm text-sage-500">没有找到匹配的会员</p>
+                    </div>
+                  ) : (
+                    quickReorderFilteredMembers.map((m) => {
+                      const memberPetCount = pets.filter((p) => p.memberId === m.id).length;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => setQuickReorderSelectedMember(m)}
+                          className="w-full flex items-center gap-3 p-3 rounded-xl border border-sage-100 bg-white hover:border-sage-300 hover:bg-sage-50 transition-all text-left group"
+                        >
+                          <Avatar name={m.name} className="w-10 h-10" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sage-800">{m.name}</span>
+                              <span
+                                className={cn(
+                                  'text-xs px-1.5 py-0.5 rounded-full',
+                                  m.level === '钻石' && 'bg-terracotta-100 text-terracotta-600',
+                                  m.level === '金卡' && 'bg-cream-300 text-sage-700',
+                                  m.level === '银卡' && 'bg-sky2-100 text-sky2-600',
+                                  m.level === '普通' && 'bg-sage-100 text-sage-600',
+                                )}
+                              >
+                                {m.level}
+                              </span>
+                            </div>
+                            <p className="text-xs text-sage-500">{m.phone}</p>
+                          </div>
+                          <div className="text-xs text-sage-400 flex items-center gap-1">
+                            <PawPrint className="w-3 h-3" />
+                            {memberPetCount}只
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-sage-300 group-hover:text-sage-500 transition-colors" />
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <button
+                    onClick={() => setQuickReorderSelectedMember(null)}
+                    className="flex items-center gap-1 text-sm text-sage-500 hover:text-sage-700 font-medium"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    返回选择会员
+                  </button>
+
+                  <div className="flex items-center gap-3 p-3 bg-cream-50 rounded-xl">
+                    <Avatar name={quickReorderSelectedMember.name} className="w-10 h-10" />
+                    <div>
+                      <div className="font-medium text-sage-800">{quickReorderSelectedMember.name}</div>
+                      <div className="text-xs text-sage-500">{quickReorderSelectedMember.phone}</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 max-h-72 overflow-y-auto">
+                    {quickReorderMemberPets.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <PawPrint className="w-10 h-10 mx-auto text-sage-300 mb-2" />
+                        <p className="text-sm text-sage-500">该会员暂无宠物</p>
+                      </div>
+                    ) : (
+                      quickReorderMemberPets.map((pet) => {
+                        const lastApt = getPetLastAppointment(pet.id);
+                        const lastService = lastApt ? services.find((s) => s.id === lastApt.serviceId) : null;
+                        const lastGroomer = lastApt ? groomers.find((g) => g.id === lastApt.groomerId) : null;
+                        const hasHistory = !!lastApt;
+
+                        return (
+                          <div
+                            key={pet.id}
+                            className={cn(
+                              'p-4 rounded-xl border transition-all',
+                              hasHistory
+                                ? 'border-sage-200 bg-white hover:border-sage-300 hover:shadow-card-hover'
+                                : 'border-gray-200 bg-gray-50 opacity-70',
+                            )}
+                          >
+                            <div className="flex items-start gap-3 mb-3">
+                              <Avatar name={pet.name} className="w-10 h-10" />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className="font-semibold text-sage-800">{pet.name}</span>
+                                  <span
+                                    className={cn(
+                                      'text-xs px-1.5 py-0.5 rounded-full',
+                                      pet.gender === '公'
+                                        ? 'bg-sky2-100 text-sky2-600'
+                                        : 'bg-petal-100 text-petal-400',
+                                    )}
+                                  >
+                                    {pet.gender}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-sage-500">{pet.breed}</p>
+                              </div>
+                            </div>
+
+                            {hasHistory && lastApt && lastService && lastGroomer ? (
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-sage-500">上次服务</span>
+                                  <span className="font-medium text-sage-700">{lastService.name}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-sage-500">时间</span>
+                                  <span className="text-sage-600">
+                                    {format(parseISO(lastApt.startAt), 'yyyy-MM-dd')}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-sage-500">美容师</span>
+                                  <span className="text-sage-600">{lastGroomer.name}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-sage-500">金额</span>
+                                  <span className="font-semibold text-terracotta-500">¥{lastService.price}</span>
+                                </div>
+                                <div className="pt-2 flex justify-end">
+                                  <button
+                                    onClick={() => handleQuickReorderSelect(pet)}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-terracotta-500 text-white text-xs font-medium hover:bg-terracotta-600 transition-colors"
+                                  >
+                                    👉 用这个方案
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-400 italic text-center py-2">
+                                暂无服务记录
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </Modal>
         )}

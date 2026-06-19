@@ -92,6 +92,12 @@ export interface FollowUpRecord {
   customerFeedback: string;
   nextCareSuggestion: string;
   createdAt: string;
+  hasIssue: boolean;
+  issueType?: 'unsatisfied' | 'pet_abnormal' | 'other';
+  issueDescription?: string;
+  issueStatus: 'open' | 'processing' | 'resolved';
+  issueResolution?: string;
+  issueHandledAt?: string;
 }
 
 export interface ConsumptionRecord {

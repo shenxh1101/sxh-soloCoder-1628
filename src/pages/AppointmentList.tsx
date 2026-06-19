@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
+import { computeAllPetCareCycles, getLastServiceRecord } from '@/utils/careCycle';
 import {
   startOfMonth,
   endOfMonth,
@@ -46,12 +47,13 @@ import {
   startOfDay,
   endOfDay,
   subDays,
+  addDays,
   differenceInMinutes,
   addMinutes,
   parseISO,
 } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import type { Appointment, AppointmentStatus, PayType, Pet, Member, Service, Groomer, ServiceCategory } from '@/types';
+import type { Appointment, AppointmentStatus, PayType, Pet, Member, Service, Groomer, ServiceCategory, FollowUpRecord, ConsumptionRecord } from '@/types';
 
 const statusConfig: Record<AppointmentStatus, { label: string; className: string; bg: string }> = {
   pending: { label: '待确认', className: 'bg-petal-100 text-petal-400 border-petal-200', bg: 'bg-petal-300' },
@@ -79,6 +81,42 @@ const payOptions: { key: PayType; label: string; icon: typeof Wallet; color: str
 ];
 
 type ViewMode = 'month' | 'week' | 'day';
+type MainView = 'calendar' | 'list' | 'repurchase';
+type RepurchaseStatus = 'overdue' | 'due_soon' | 'later' | 'booked';
+type RepurchaseGroupBy = 'none' | 'groomer' | 'service' | 'status';
+
+interface RepurchaseCardData {
+  pet: Pet;
+  member: Member;
+  lastService: {
+    service: Service;
+    appointment?: Appointment;
+    consumption?: ConsumptionRecord;
+    groomer?: Groomer;
+    date: Date;
+    amount: number;
+  } | null;
+  lastFollowUp: FollowUpRecord | null;
+  nextSuggestionDate: Date | null;
+  suggestionSource: 'follow_up' | 'system' | null;
+  futureAppointment: Appointment | null;
+  status: RepurchaseStatus;
+  serviceCategory: ServiceCategory;
+}
+
+const repurchaseStatusConfig: Record<RepurchaseStatus, { label: string; className: string }> = {
+  overdue: { label: '已过期', className: 'bg-petal-100 text-petal-600 border-petal-200' },
+  due_soon: { label: '7天内', className: 'bg-terracotta-100 text-terracotta-600 border-terracotta-200' },
+  later: { label: '稍后', className: 'bg-sage-100 text-sage-600 border-sage-200' },
+  booked: { label: '已预约', className: 'bg-sky2-100 text-sky2-600 border-sky2-200' },
+};
+
+const quickFilterOptions: { key: 'all' | 'pending' | 'booked' | 'overdue'; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'pending', label: '待跟进' },
+  { key: 'booked', label: '已预约' },
+  { key: 'overdue', label: '已过期' },
+];
 
 type FinderFn<T> = (id: string) => T | undefined;
 
@@ -102,6 +140,108 @@ function Avatar({ name, className }: { name: string; className?: string }) {
       {initial}
     </div>
   );
+}
+
+function computeRepurchaseData(
+  pets: Pet[],
+  members: Member[],
+  appointments: Appointment[],
+  consumptionRecords: ConsumptionRecord[],
+  services: Service[],
+  groomers: Groomer[],
+  followUpRecords: FollowUpRecord[]
+): RepurchaseCardData[] {
+  const now = new Date();
+  const result: RepurchaseCardData[] = [];
+
+  const groomerSimple = groomers.map((g) => ({ id: g.id, name: g.name }));
+  const careCycles = computeAllPetCareCycles(
+    pets,
+    members,
+    consumptionRecords,
+    followUpRecords,
+    services,
+    groomerSimple
+  );
+
+  for (const cycle of careCycles) {
+    const pet = pets.find((p) => p.id === cycle.petId);
+    const member = members.find((m) => m.id === cycle.memberId);
+    if (!pet || !member) continue;
+
+    const lastConsumption = getLastServiceRecord(pet.id, consumptionRecords);
+    const lastServiceObj = lastConsumption
+      ? services.find((s) => s.id === lastConsumption.serviceId)
+      : null;
+    const lastGroomer = lastConsumption?.groomerId
+      ? groomers.find((g) => g.id === lastConsumption.groomerId)
+      : undefined;
+
+    let lastService: RepurchaseCardData['lastService'] = null;
+    if (lastConsumption && lastServiceObj) {
+      lastService = {
+        service: lastServiceObj,
+        consumption: lastConsumption,
+        groomer: lastGroomer,
+        date: new Date(lastConsumption.createdAt),
+        amount: lastConsumption.amount,
+      };
+    }
+
+    const petFollowUps = followUpRecords
+      .filter((f) => f.petId === pet.id)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const lastFollowUp = petFollowUps[0] ?? null;
+
+    const futureAppointment =
+      appointments.find(
+        (a) =>
+          a.petId === pet.id &&
+          (a.status === 'confirmed' || a.status === 'pending') &&
+          new Date(a.startAt) > now
+      ) ?? null;
+
+    let status: RepurchaseStatus;
+    if (futureAppointment) {
+      status = 'booked';
+    } else if (cycle.status === 'overdue') {
+      status = 'overdue';
+    } else if (cycle.status === 'due_soon') {
+      status = 'due_soon';
+    } else {
+      status = 'later';
+    }
+
+    const serviceCategory: ServiceCategory = lastService?.service.category ?? '其他';
+
+    result.push({
+      pet,
+      member,
+      lastService,
+      lastFollowUp,
+      nextSuggestionDate: cycle.nextSuggestedDate,
+      suggestionSource: cycle.source === 'followup' ? 'follow_up' : 'system',
+      futureAppointment,
+      status,
+      serviceCategory,
+    });
+  }
+
+  return result.sort((a, b) => {
+    const statusOrder: Record<RepurchaseStatus, number> = {
+      overdue: 0,
+      due_soon: 1,
+      later: 2,
+      booked: 3,
+    };
+    const orderA = statusOrder[a.status];
+    const orderB = statusOrder[b.status];
+    if (orderA !== orderB) return orderA - orderB;
+    if (a.nextSuggestionDate && b.nextSuggestionDate) {
+      return a.nextSuggestionDate.getTime() - b.nextSuggestionDate.getTime();
+    }
+    return 0;
+  });
 }
 
 interface AppointmentEditModalProps {
@@ -840,6 +980,8 @@ export default function AppointmentList() {
   const pets = useAppStore((s) => s.pets);
   const services = useAppStore((s) => s.services);
   const groomers = useAppStore((s) => s.groomers);
+  const consumptionRecords = useAppStore((s) => s.consumptionRecords);
+  const followUpRecords = useAppStore((s) => s.followUpRecords);
   const cancelAppointment = useAppStore((s) => s.cancelAppointment);
   const completeAppointment = useAppStore((s) => s.completeAppointment);
   const createFollowUp = useAppStore((s) => s.createFollowUp);
@@ -847,6 +989,7 @@ export default function AppointmentList() {
   const checkConflict = useAppStore((s) => s.checkConflict);
 
   const [viewMode, setViewMode] = useState<ViewMode>('month');
+  const [mainView, setMainView] = useState<MainView>('calendar');
   const [cursor, setCursor] = useState(new Date());
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<AppointmentStatus | 'all'>('all');
@@ -858,6 +1001,10 @@ export default function AppointmentList() {
   const [completeModal, setCompleteModal] = useState<Appointment | null>(null);
   const [editModal, setEditModal] = useState<Appointment | null>(null);
   const [actionToast, setActionToast] = useState<string | null>(null);
+  const [repurchaseSearch, setRepurchaseSearch] = useState('');
+  const [repurchaseGroupBy, setRepurchaseGroupBy] = useState<RepurchaseGroupBy>('none');
+  const [repurchaseQuickFilter, setRepurchaseQuickFilter] = useState<'all' | 'pending' | 'booked' | 'overdue'>('all');
+  const [expandedFeedback, setExpandedFeedback] = useState<string | null>(null);
 
   const getPet: FinderFn<Pet> = (id) => pets.find((p) => p.id === id);
   const getMember: FinderFn<Member> = (id) => members.find((m) => m.id === id);
@@ -871,6 +1018,81 @@ export default function AppointmentList() {
   }, [services]);
 
   const activeGroomers = useMemo(() => groomers.filter((g) => g.isActive), [groomers]);
+
+  const repurchaseData = useMemo(
+    () => computeRepurchaseData(pets, members, appointments, consumptionRecords, services, groomers, followUpRecords),
+    [pets, members, appointments, consumptionRecords, services, groomers, followUpRecords]
+  );
+
+  const filteredRepurchaseData = useMemo(() => {
+    let list = [...repurchaseData];
+
+    if (repurchaseQuickFilter === 'pending') {
+      list = list.filter((item) => item.status === 'overdue' || item.status === 'due_soon');
+    } else if (repurchaseQuickFilter === 'booked') {
+      list = list.filter((item) => item.status === 'booked');
+    } else if (repurchaseQuickFilter === 'overdue') {
+      list = list.filter((item) => item.status === 'overdue');
+    }
+
+    if (repurchaseSearch.trim()) {
+      const q = repurchaseSearch.trim().toLowerCase();
+      list = list.filter((item) =>
+        item.pet.name.toLowerCase().includes(q) ||
+        item.member.name.toLowerCase().includes(q) ||
+        item.member.phone.includes(q)
+      );
+    }
+
+    return list;
+  }, [repurchaseData, repurchaseQuickFilter, repurchaseSearch]);
+
+  const groupedRepurchaseData = useMemo(() => {
+    const list = filteredRepurchaseData;
+    if (repurchaseGroupBy === 'none') {
+      return [{ key: 'all', label: '全部', items: list }];
+    }
+
+    const groups = new Map<string, RepurchaseCardData[]>();
+
+    if (repurchaseGroupBy === 'groomer') {
+      for (const item of list) {
+        const groomerName = item.lastService?.groomer?.name ?? '未分配';
+        const arr = groups.get(groomerName) ?? [];
+        arr.push(item);
+        groups.set(groomerName, arr);
+      }
+    } else if (repurchaseGroupBy === 'service') {
+      for (const item of list) {
+        const category = item.serviceCategory;
+        const arr = groups.get(category) ?? [];
+        arr.push(item);
+        groups.set(category, arr);
+      }
+    } else if (repurchaseGroupBy === 'status') {
+      for (const item of list) {
+        const label = repurchaseStatusConfig[item.status].label;
+        const arr = groups.get(label) ?? [];
+        arr.push(item);
+        groups.set(label, arr);
+      }
+    }
+
+    const result = Array.from(groups.entries()).map(([key, items]) => ({
+      key,
+      label: key,
+      items,
+    }));
+
+    if (repurchaseGroupBy === 'status') {
+      const statusOrder = ['已过期', '7天内', '稍后', '已预约'];
+      result.sort((a, b) => statusOrder.indexOf(a.label) - statusOrder.indexOf(b.label));
+    } else {
+      result.sort((a, b) => a.label.localeCompare(b.label));
+    }
+
+    return result;
+  }, [filteredRepurchaseData, repurchaseGroupBy]);
 
   const viewFilteredAppointments = useMemo(() => {
     return appointments.filter((a) => {
@@ -1025,110 +1247,180 @@ export default function AppointmentList() {
 
         <div className="rounded-2xl2 bg-white p-4 shadow-soft">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex rounded-xl2 bg-cream-100 p-1">
-              {(['month', 'week', 'day'] as ViewMode[]).map((m) => (
+            <div className="flex rounded-full bg-cream-100 p-1">
+              {(['calendar', 'list', 'repurchase'] as MainView[]).map((v) => (
                 <button
-                  key={m}
-                  onClick={() => setViewMode(m)}
+                  key={v}
+                  onClick={() => setMainView(v)}
                   className={cn(
-                    'flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all',
-                    viewMode === m
-                      ? 'bg-white text-sage-700 shadow-sm'
-                      : 'text-sage-500 hover:text-sage-700'
+                    'rounded-full px-4 py-1.5 text-sm font-medium transition-all',
+                    mainView === v
+                      ? 'bg-sage-500 text-white shadow-sm'
+                      : 'text-sage-600 hover:text-sage-700'
                   )}
                 >
-                  {m === 'month' ? <CalendarDays size={15} /> : m === 'week' ? <LayoutGrid size={15} /> : <List size={15} />}
-                  {m === 'month' ? '月' : m === 'week' ? '周' : '日'}
+                  {v === 'calendar' ? '日历视图' : v === 'list' ? '列表视图' : '复购跟进'}
                 </button>
               ))}
             </div>
 
-            <div className="flex items-center gap-1 rounded-xl2 border border-cream-200 bg-white px-1">
-              <button
-                onClick={goPrev}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-sage-500 transition-colors hover:bg-cream-100"
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <button
-                onClick={() => setCursor(new Date())}
-                className="flex h-8 items-center justify-center rounded-lg px-2 text-xs font-semibold text-sage-600 transition-colors hover:bg-cream-100"
-              >
-                今天
-              </button>
-              <span className="min-w-[130px] px-2 text-center text-sm font-semibold text-sage-700">{headerLabel}</span>
-              <button
-                onClick={goNext}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-sage-500 transition-colors hover:bg-cream-100"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </div>
-
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索客户 / 宠物 / 手机号"
-                className="w-full rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-9 pr-3 text-sm text-sage-700 placeholder:text-sage-400 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Filter size={15} className="text-sage-400" />
-              <div className="flex flex-wrap gap-1.5">
-                {statusFilters.map((f) => (
+            {mainView === 'calendar' && (
+              <div className="flex rounded-xl2 bg-cream-100 p-1">
+                {(['month', 'week', 'day'] as ViewMode[]).map((m) => (
                   <button
-                    key={f.key}
-                    onClick={() => setStatusFilter(f.key)}
+                    key={m}
+                    onClick={() => setViewMode(m)}
                     className={cn(
-                      'rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
-                      statusFilter === f.key
-                        ? 'bg-sage-500 text-white shadow-sm'
-                        : 'bg-cream-100 text-sage-500 hover:bg-cream-200'
+                      'flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all',
+                      viewMode === m
+                        ? 'bg-white text-sage-700 shadow-sm'
+                        : 'text-sage-500 hover:text-sage-700'
                     )}
                   >
-                    {f.label}
+                    {m === 'month' ? <CalendarDays size={15} /> : m === 'week' ? <LayoutGrid size={15} /> : <List size={15} />}
+                    {m === 'month' ? '月' : m === 'week' ? '周' : '日'}
                   </button>
                 ))}
               </div>
-            </div>
+            )}
 
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
-                <select
-                  value={groomerFilter}
-                  onChange={(e) => setGroomerFilter(e.target.value)}
-                  className="appearance-none rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-8 pr-9 text-sm text-sage-700 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+            {mainView === 'calendar' && (
+              <div className="flex items-center gap-1 rounded-xl2 border border-cream-200 bg-white px-1">
+                <button
+                  onClick={goPrev}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-sage-500 transition-colors hover:bg-cream-100"
                 >
-                  <option value="all">全部美容师</option>
-                  {activeGroomers.map((g) => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-                </select>
-                <ChevronRight size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-sage-400" />
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  onClick={() => setCursor(new Date())}
+                  className="flex h-8 items-center justify-center rounded-lg px-2 text-xs font-semibold text-sage-600 transition-colors hover:bg-cream-100"
+                >
+                  今天
+                </button>
+                <span className="min-w-[130px] px-2 text-center text-sm font-semibold text-sage-700">{headerLabel}</span>
+                <button
+                  onClick={goNext}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-sage-500 transition-colors hover:bg-cream-100"
+                >
+                  <ChevronRight size={18} />
+                </button>
               </div>
+            )}
 
-              <div className="relative">
-                <Scissors size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
-                <select
-                  value={serviceFilter}
-                  onChange={(e) => setServiceFilter(e.target.value as ServiceCategory | 'all')}
-                  className="appearance-none rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-8 pr-9 text-sm text-sage-700 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
-                >
-                  <option value="all">全部服务</option>
-                  {serviceCategoryOptions.map((c) => (
-                    <option key={c} value={c}>{c}</option>
+            {mainView !== 'repurchase' && (
+              <>
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="搜索客户 / 宠物 / 手机号"
+                    className="w-full rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-9 pr-3 text-sm text-sage-700 placeholder:text-sage-400 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Filter size={15} className="text-sage-400" />
+                  <div className="flex flex-wrap gap-1.5">
+                    {statusFilters.map((f) => (
+                      <button
+                        key={f.key}
+                        onClick={() => setStatusFilter(f.key)}
+                        className={cn(
+                          'rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
+                          statusFilter === f.key
+                            ? 'bg-sage-500 text-white shadow-sm'
+                            : 'bg-cream-100 text-sage-500 hover:bg-cream-200'
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+                    <select
+                      value={groomerFilter}
+                      onChange={(e) => setGroomerFilter(e.target.value)}
+                      className="appearance-none rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-8 pr-9 text-sm text-sage-700 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+                    >
+                      <option value="all">全部美容师</option>
+                      {activeGroomers.map((g) => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                    <ChevronRight size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-sage-400" />
+                  </div>
+
+                  <div className="relative">
+                    <Scissors size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+                    <select
+                      value={serviceFilter}
+                      onChange={(e) => setServiceFilter(e.target.value as ServiceCategory | 'all')}
+                      className="appearance-none rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-8 pr-9 text-sm text-sage-700 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+                    >
+                      <option value="all">全部服务</option>
+                      {serviceCategoryOptions.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <ChevronRight size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-sage-400" />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {mainView === 'repurchase' && (
+              <>
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+                  <input
+                    value={repurchaseSearch}
+                    onChange={(e) => setRepurchaseSearch(e.target.value)}
+                    placeholder="搜索宠物名 / 会员名 / 手机号"
+                    className="w-full rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-9 pr-3 text-sm text-sage-700 placeholder:text-sage-400 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-sage-500">分组：</span>
+                  <select
+                    value={repurchaseGroupBy}
+                    onChange={(e) => setRepurchaseGroupBy(e.target.value as RepurchaseGroupBy)}
+                    className="appearance-none rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-3 pr-8 text-sm text-sage-700 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+                  >
+                    <option value="none">不分组</option>
+                    <option value="groomer">按美容师分组</option>
+                    <option value="service">按服务类型分组</option>
+                    <option value="status">按状态分组</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {quickFilterOptions.map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => setRepurchaseQuickFilter(f.key)}
+                      className={cn(
+                        'rounded-full px-3 py-1.5 text-xs font-medium transition-all',
+                        repurchaseQuickFilter === f.key
+                          ? 'bg-sage-500 text-white shadow-sm'
+                          : 'bg-cream-100 text-sage-500 hover:bg-cream-200'
+                      )}
+                    >
+                      {f.label}
+                    </button>
                   ))}
-                </select>
-                <ChevronRight size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-sage-400" />
-              </div>
-            </div>
+                </div>
+              </>
+            )}
           </div>
 
-          {(groomerFilter !== 'all' || serviceFilter !== 'all') && (
+          {mainView !== 'repurchase' && (groomerFilter !== 'all' || serviceFilter !== 'all') && (
             <div className="mt-3 flex flex-wrap items-center gap-2 pt-3 border-t border-cream-100">
               <span className="text-xs text-sage-500">当前筛选：</span>
               {groomerFilter !== 'all' && (
@@ -1168,7 +1460,7 @@ export default function AppointmentList() {
           )}
         </div>
 
-        {conflictDays.size > 0 && (
+        {mainView !== 'repurchase' && conflictDays.size > 0 && (
           <motion.div
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1184,9 +1476,10 @@ export default function AppointmentList() {
           </motion.div>
         )}
 
-        <div className="rounded-2xl2 bg-white p-5 shadow-soft">
-          <div className="mb-5 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-sage-500 mr-1">美容师快速筛选：</span>
+        {mainView === 'calendar' && (
+          <div className="rounded-2xl2 bg-white p-5 shadow-soft">
+            <div className="mb-5 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-sage-500 mr-1">美容师快速筛选：</span>
             <button
               onClick={() => setGroomerFilter('all')}
               className={cn(
@@ -1357,11 +1650,13 @@ export default function AppointmentList() {
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+          </div>
+        )}
 
-        <div className="rounded-2xl2 bg-white shadow-soft">
-          <div className="flex items-center justify-between border-b border-cream-100 p-5">
-            <h3 className="text-base font-semibold text-sage-700">最近 30 天预约</h3>
+        {mainView !== 'repurchase' && (
+          <div className="rounded-2xl2 bg-white shadow-soft">
+            <div className="flex items-center justify-between border-b border-cream-100 p-5">
+              <h3 className="text-base font-semibold text-sage-700">最近 30 天预约</h3>
             <span className="rounded-full bg-cream-100 px-2.5 py-0.5 text-xs font-medium text-sage-500">
               共 {filteredList.length} 条
             </span>
@@ -1453,7 +1748,60 @@ export default function AppointmentList() {
               })
             )}
           </div>
-        </div>
+          </div>
+        )}
+
+        {mainView === 'repurchase' && (
+          <div className="space-y-6">
+            {groupedRepurchaseData.map((group) => (
+              <div key={group.key} className="space-y-3">
+                {repurchaseGroupBy !== 'none' && (
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-sage-700">{group.label}</h3>
+                    <span className="rounded-full bg-sage-100 px-2.5 py-0.5 text-xs font-semibold text-sage-600">
+                      {group.items.length}
+                    </span>
+                  </div>
+                )}
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {group.items.map((item) => (
+                    <RepurchaseCard
+                      key={item.pet.id}
+                      data={item}
+                      expanded={expandedFeedback === item.pet.id}
+                      onToggleExpand={() =>
+                        setExpandedFeedback(expandedFeedback === item.pet.id ? null : item.pet.id)
+                      }
+                      onViewAppointment={() => {
+                        if (item.futureAppointment) {
+                          navigate('/appointments/' + item.futureAppointment.id);
+                        }
+                      }}
+                      onQuickReorder={() => {
+                        const params = new URLSearchParams();
+                        params.set('petId', item.pet.id);
+                        if (item.lastService?.service.id) {
+                          params.set('serviceId', item.lastService.service.id);
+                        }
+                        if (item.lastService?.groomer?.id) {
+                          params.set('groomerId', item.lastService.groomer.id);
+                        }
+                        params.set('quickReorder', '1');
+                        navigate('/appointments/new?' + params.toString());
+                      }}
+                    />
+                  ))}
+                </div>
+                {group.items.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <CalendarDays size={32} className="text-sage-300" />
+                    <p className="mt-3 text-sm font-medium text-sage-500">暂无匹配的跟进记录</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -1543,6 +1891,145 @@ export default function AppointmentList() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+interface RepurchaseCardProps {
+  data: RepurchaseCardData;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onViewAppointment: () => void;
+  onQuickReorder: () => void;
+}
+
+function RepurchaseCard({
+  data,
+  expanded,
+  onToggleExpand,
+  onViewAppointment,
+  onQuickReorder,
+}: RepurchaseCardProps) {
+  const { pet, member, lastService, lastFollowUp, nextSuggestionDate, suggestionSource, futureAppointment, status } = data;
+  const statusCfg = repurchaseStatusConfig[status];
+  const feedback = lastFollowUp?.customerFeedback || '';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-2xl2 border border-cream-200 bg-white p-5 shadow-soft hover:shadow-card-hover transition-all"
+    >
+      <div className="flex gap-4">
+        <div className="flex flex-col items-center gap-2">
+          <Avatar name={pet.name} className="w-14 h-14 text-lg" />
+          <div className="text-center">
+            <p className="text-sm font-bold text-sage-700">{pet.name}</p>
+            <p className="text-xs text-sage-400">{pet.breed}</p>
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-sage-600">
+              👤 {member.name}
+            </span>
+            <span className="text-xs text-sage-400">📱 {member.phone}</span>
+            <span className={cn('rounded-full border px-2 py-0.5 text-xs font-medium', statusCfg.className)}>
+              {statusCfg.label}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-sage-500">上次服务</p>
+              {lastService ? (
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-sage-700 truncate">
+                    {lastService.service.name}
+                  </p>
+                  <p className="text-xs text-sage-500">
+                    {format(lastService.date, 'yyyy-MM-dd')}
+                  </p>
+                  <p className="text-xs text-sage-500">
+                    💇 {lastService.groomer?.name ?? '未分配'}
+                  </p>
+                  <p className="text-xs font-semibold text-terracotta-500">
+                    ¥{lastService.amount}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-sage-400">暂无服务记录</p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-sage-500">客户反馈</p>
+              {feedback ? (
+                <div
+                  className="cursor-pointer group"
+                  onClick={onToggleExpand}
+                >
+                  <p
+                    className={cn(
+                      'text-xs text-sage-600 leading-relaxed',
+                      !expanded && 'line-clamp-2'
+                    )}
+                  >
+                    {feedback}
+                  </p>
+                  <p className="text-[11px] text-sky2-500 mt-0.5 group-hover:text-sky2-600">
+                    {expanded ? '收起' : '展开查看'}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-sage-400">暂无反馈</p>
+              )}
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-cream-100 space-y-2">
+            {nextSuggestionDate ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-medium text-sage-600">
+                  📅 建议下次：
+                </span>
+                <span className="text-sm font-semibold text-sage-700">
+                  {format(nextSuggestionDate, 'yyyy-MM-dd')}
+                </span>
+                <span className="text-[11px] text-sage-400">
+                  （来源：{suggestionSource === 'follow_up' ? '回访记录' : '系统推算'}）
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-sage-400">📅 暂无下次建议</p>
+            )}
+          </div>
+
+          <div className="pt-2 flex items-center justify-end gap-2">
+            {futureAppointment ? (
+              <>
+                <span className="rounded-full bg-sky2-100 px-3 py-1 text-xs font-semibold text-sky2-600">
+                  已预约
+                </span>
+                <button
+                  onClick={onViewAppointment}
+                  className="rounded-xl2 bg-sky2-500 px-4 py-2 text-xs font-medium text-white shadow-soft transition-all hover:bg-sky2-600"
+                >
+                  查看预约
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={onQuickReorder}
+                className="rounded-xl2 bg-sage-500 px-4 py-2 text-xs font-medium text-white shadow-soft transition-all hover:bg-sage-600 flex items-center gap-1.5"
+              >
+                📅 快速预约
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

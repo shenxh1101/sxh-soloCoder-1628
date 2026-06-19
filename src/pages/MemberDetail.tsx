@@ -23,6 +23,8 @@ import {
   Save,
   Tag,
   MessageSquareText,
+  CalendarClock,
+  Sparkles,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { useAppStore } from '@/store';
@@ -36,6 +38,7 @@ import {
 import { cn } from '@/lib/utils';
 import { format, parseISO, formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { computePetCareCycle, type PetCareCycle } from '@/utils/careCycle';
 
 const levelColors: Record<MemberLevel, string> = {
   普通: 'bg-gray-100 text-gray-600 border-gray-200',
@@ -323,6 +326,7 @@ export default function MemberDetail() {
   const pointsRecords = useAppStore((s) => s.pointsRecords);
   const getFollowUpsByMember = useAppStore((s) => s.getFollowUpsByMember);
   const followUpRecords = useAppStore((s) => s.followUpRecords);
+  const updateFollowUpIssue = useAppStore((s) => s.updateFollowUpIssue);
   const updateMember = useAppStore((s) => s.updateMember);
   const rechargeMember = useAppStore((s) => s.rechargeMember);
   const createPet = useAppStore((s) => s.createPet);
@@ -343,6 +347,23 @@ export default function MemberDetail() {
   const member = useMemo(() => members.find((m) => m.id === id) || null, [members, id]);
 
   const memberPets = useMemo(() => pets.filter((p) => p.memberId === id), [pets, id]);
+
+  const petCareCycles = useMemo(() => {
+    if (!member) return new Map<string, PetCareCycle>();
+    const map = new Map<string, PetCareCycle>();
+    for (const pet of memberPets) {
+      const cycle = computePetCareCycle(
+        pet,
+        member,
+        consumptionRecords,
+        followUpRecords,
+        services,
+        groomers
+      );
+      map.set(pet.id, cycle);
+    }
+    return map;
+  }, [memberPets, member, consumptionRecords, followUpRecords, services, groomers]);
   const memberRecharges = useMemo(
     () => rechargeRecords.filter((r) => r.memberId === id),
     [rechargeRecords, id]
@@ -359,7 +380,16 @@ export default function MemberDetail() {
     () => (id ? getFollowUpsByMember(id) : []),
     [id, getFollowUpsByMember, followUpRecords],
   );
+
+  const openIssueCount = useMemo(
+    () => memberFollowUps.filter((f) => f.hasIssue && f.issueStatus !== 'resolved').length,
+    [memberFollowUps],
+  );
   const [expandedFollowUps, setExpandedFollowUps] = useState<Set<string>>(new Set());
+  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [currentIssueFollowUpId, setCurrentIssueFollowUpId] = useState<string | null>(null);
+  const [issueStatusDraft, setIssueStatusDraft] = useState<'processing' | 'resolved'>('processing');
+  const [issueResolutionDraft, setIssueResolutionDraft] = useState('');
 
   const toggleFollowUpExpand = (id: string) => {
     setExpandedFollowUps((prev) => {
@@ -367,6 +397,26 @@ export default function MemberDetail() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+  };
+
+  const openIssueModal = (followUpId: string) => {
+    const fu = memberFollowUps.find((f) => f.id === followUpId);
+    if (!fu) return;
+    setCurrentIssueFollowUpId(followUpId);
+    setIssueStatusDraft(fu.issueStatus === 'open' ? 'processing' : (fu.issueStatus as 'processing' | 'resolved'));
+    setIssueResolutionDraft(fu.issueResolution || '');
+    setShowIssueModal(true);
+  };
+
+  const handleSaveIssue = () => {
+    if (!currentIssueFollowUpId) return;
+    updateFollowUpIssue(currentIssueFollowUpId, {
+      issueStatus: issueStatusDraft,
+      issueResolution: issueResolutionDraft.trim(),
+    });
+    setShowIssueModal(false);
+    setCurrentIssueFollowUpId(null);
+    showToast('问题处理已更新');
   };
 
   const totalRecharge = useMemo(
@@ -526,6 +576,26 @@ export default function MemberDetail() {
           <ChevronRight size={14} />
           <span className="text-sage-700 font-medium">{member.name}</span>
         </nav>
+
+        {openIssueCount > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 p-4 rounded-2xl bg-petal-500 text-white shadow-soft-lg cursor-pointer hover:bg-petal-600 transition-colors"
+            onClick={() => setActiveTab('followUps')}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                <span className="text-xl">⚠️</span>
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold text-base">该客户有 {openIssueCount} 项待处理问题</div>
+                <div className="text-xs opacity-90 mt-0.5">点击跳转到服务回访查看详情</div>
+              </div>
+              <ChevronRight className="w-5 h-5 shrink-0" />
+            </div>
+          </motion.div>
+        )}
 
         <div className="relative overflow-hidden bg-gradient-to-br from-sage-100 via-cream-50 to-cream-100 rounded-3xl shadow-soft p-6 sm:p-8 mb-6 border border-cream-200">
           <div className="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-sage-200/30 blur-3xl" />
@@ -730,6 +800,125 @@ export default function MemberDetail() {
                                     <span className="text-xs text-sage-400 italic">暂无偏好</span>
                                   )}
                                 </div>
+                              </div>
+
+                              <div className="mt-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-1.5 text-sm font-medium text-sage-600">
+                                    <CalendarClock size={14} className="text-sage-500" />
+                                    护理周期
+                                  </div>
+                                  {(() => {
+                                    const careCycle = petCareCycles.get(pet.id);
+                                    if (!careCycle || !careCycle.nextServiceId) return null;
+                                    return (
+                                      <button
+                                        onClick={() => {
+                                          const params = new URLSearchParams();
+                                          params.set('petId', pet.id);
+                                          params.set('serviceId', careCycle.nextServiceId);
+                                          if (careCycle.lastGroomerId) {
+                                            params.set('groomerId', careCycle.lastGroomerId);
+                                          }
+                                          params.set('quickReorder', '1');
+                                          navigate(`/appointments/new?${params.toString()}`);
+                                        }}
+                                        className="text-xs font-medium px-3 py-1.5 rounded-full border-2 border-terracotta-400 bg-white text-terracotta-500 hover:bg-terracotta-50 transition-all flex items-center gap-1"
+                                      >
+                                        <CalendarDays size={12} />
+                                        一键约同款
+                                      </button>
+                                    );
+                                  })()}
+                                </div>
+                                {(() => {
+                                  const careCycle = petCareCycles.get(pet.id);
+                                  if (!careCycle) {
+                                    return (
+                                      <div className="p-3 bg-white rounded-xl border border-cream-100 text-xs text-sage-400 text-center">
+                                        暂无护理周期数据
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div className="p-3 bg-white rounded-xl border border-cream-100 space-y-2.5">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-[11px] text-sage-400 mb-0.5 flex items-center gap-1">
+                                            <span>📅</span> 上次服务
+                                          </div>
+                                          <div className="text-sm font-medium text-sage-700 truncate">
+                                            {careCycle.lastServiceDate
+                                              ? format(careCycle.lastServiceDate, 'yyyy-MM-dd')
+                                              : '暂无记录'}
+                                            {careCycle.lastServiceName !== '暂无服务记录' && (
+                                              <span className="text-sage-500 font-normal ml-1.5">
+                                                · {careCycle.lastServiceName}
+                                              </span>
+                                            )}
+                                          </div>
+                                          {careCycle.lastGroomerName && (
+                                            <div className="text-xs text-sage-400 mt-0.5">
+                                              美容师：{careCycle.lastGroomerName}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-[11px] text-sage-400 mb-0.5 flex items-center gap-1">
+                                            <Sparkles size={10} className="text-terracotta-400" />
+                                            下次建议
+                                          </div>
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-sm font-medium text-sage-700">
+                                              {careCycle.nextSuggestedDate
+                                                ? format(careCycle.nextSuggestedDate, 'yyyy-MM-dd')
+                                                : '暂无建议'}
+                                            </span>
+                                            {careCycle.nextSuggestedDate && (
+                                              <span
+                                                className={cn(
+                                                  'px-2 py-0.5 text-[10px] font-semibold rounded-full',
+                                                  careCycle.status === 'overdue'
+                                                    ? 'bg-green-100 text-green-600 border border-green-200'
+                                                    : careCycle.status === 'due_soon'
+                                                    ? 'bg-amber-100 text-amber-600 border border-amber-200'
+                                                    : 'bg-gray-100 text-gray-500 border border-gray-200'
+                                                )}
+                                              >
+                                                {careCycle.status === 'overdue'
+                                                  ? '已到期'
+                                                  : careCycle.status === 'due_soon'
+                                                  ? '7天内'
+                                                  : '稍后'}
+                                              </span>
+                                            )}
+                                          </div>
+                                          {careCycle.nextServiceName && (
+                                            <div className="text-xs text-sage-500 mt-0.5">
+                                              建议：{careCycle.nextServiceName}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="pt-1">
+                                        <span
+                                          className={cn(
+                                            'text-[10px] px-2 py-0.5 rounded-full',
+                                            careCycle.source === 'followup'
+                                              ? 'bg-sky2-50 text-sky2-500 border border-sky2-100'
+                                              : 'bg-gray-50 text-gray-400 border border-gray-100'
+                                          )}
+                                        >
+                                          {careCycle.source === 'followup'
+                                            ? '📌 来自回访记录'
+                                            : '🤖 系统自动推算'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
 
                               <div className="mt-4">
@@ -1097,6 +1286,16 @@ export default function MemberDetail() {
                                   >
                                     #{fu.appointmentId.slice(-6)} 预约
                                   </Link>
+                                  {fu.hasIssue && (
+                                    <span className={cn(
+                                      'inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-bold',
+                                      fu.issueStatus === 'resolved'
+                                        ? 'bg-sage-100 text-sage-700 border border-sage-200'
+                                        : 'bg-petal-500 text-white shadow-sm',
+                                    )}>
+                                      {fu.issueStatus === 'resolved' ? '✓ 已解决' : '⚠️ 待处理'}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                                   <div className="truncate text-sage-500">
@@ -1154,6 +1353,67 @@ export default function MemberDetail() {
                                         {fu.nextCareSuggestion || <span className="text-sage-400 italic">无记录</span>}
                                       </p>
                                     </div>
+                                    {fu.hasIssue && (
+                                      <div className="p-3 rounded-xl bg-petal-50 border-2 border-petal-200">
+                                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-petal-500 text-white">
+                                            ⚠️ 有问题
+                                          </span>
+                                          {fu.issueType && (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-petal-100 text-petal-700 border border-petal-200">
+                                              {fu.issueType === 'unsatisfied' && '客户不满意'}
+                                              {fu.issueType === 'pet_abnormal' && '宠物异常'}
+                                              {fu.issueType === 'other' && '其他'}
+                                            </span>
+                                          )}
+                                          <span className={cn(
+                                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold',
+                                            fu.issueStatus === 'open' && 'bg-petal-100 text-petal-600 border border-petal-200',
+                                            fu.issueStatus === 'processing' && 'bg-amber-100 text-amber-700 border border-amber-200',
+                                            fu.issueStatus === 'resolved' && 'bg-sage-100 text-sage-700 border border-sage-200',
+                                          )}>
+                                            {fu.issueStatus === 'open' && '待处理'}
+                                            {fu.issueStatus === 'processing' && '处理中'}
+                                            {fu.issueStatus === 'resolved' && '✓ 已解决'}
+                                          </span>
+                                        </div>
+                                        {fu.issueDescription && (
+                                          <div className="mb-2">
+                                            <div className="text-[11px] font-semibold text-petal-600 mb-1">问题描述</div>
+                                            <p className="text-sm text-sage-700 leading-relaxed">
+                                              {fu.issueDescription}
+                                            </p>
+                                          </div>
+                                        )}
+                                        {fu.issueStatus === 'resolved' && fu.issueResolution && (
+                                          <div className="p-2.5 rounded-lg bg-sage-50/80 border border-sage-200/60">
+                                            <div className="text-[11px] font-semibold text-sage-600 mb-1 flex items-center gap-1">
+                                              ✓ 处理说明
+                                            </div>
+                                            <p className="text-sm text-sage-700 leading-relaxed">
+                                              {fu.issueResolution}
+                                            </p>
+                                            {fu.issueHandledAt && (
+                                              <p className="mt-1 text-[11px] text-sage-400">
+                                                处理时间：{format(new Date(fu.issueHandledAt), 'yyyy-MM-dd HH:mm')}
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
+                                        {fu.issueStatus !== 'resolved' && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openIssueModal(fu.id);
+                                            }}
+                                            className="mt-2 w-full py-2 rounded-lg bg-petal-500 hover:bg-petal-600 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                                          >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                            处理问题
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 </motion.div>
                               )}
@@ -1176,6 +1436,108 @@ export default function MemberDetail() {
         onClose={() => setRechargeOpen(false)}
         onSuccess={() => showToast('充值成功！数据已更新')}
       />
+
+      <AnimatePresence>
+        {showIssueModal && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowIssueModal(false)} />
+            <motion.div
+              className="relative w-full max-w-md bg-cream-50 rounded-2xl2 shadow-card-hover overflow-hidden"
+              initial={{ scale: 0.95, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.95, y: 20, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            >
+              <div className="flex items-center justify-between p-6 border-b border-cream-200 bg-cream-50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-petal-100 flex items-center justify-center">
+                    <span className="text-lg">⚠️</span>
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-sage-700">处理问题</h2>
+                    <p className="text-sm text-sage-500 mt-0.5">更新问题处理状态</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowIssueModal(false)}
+                  className="p-2 rounded-xl hover:bg-cream-200 text-sage-500 hover:text-sage-700 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="p-3 rounded-xl bg-petal-50 border border-petal-200">
+                  <div className="text-xs font-semibold text-petal-600 mb-1">问题描述</div>
+                  <p className="text-sm text-sage-700 leading-relaxed">
+                    {currentIssueFollowUpId
+                      ? memberFollowUps.find((f) => f.id === currentIssueFollowUpId)?.issueDescription || '无'
+                      : '无'}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-sage-600 mb-2">
+                    处理状态
+                  </label>
+                  <div className="flex gap-2">
+                    {([
+                      { key: 'processing', label: '处理中' },
+                      { key: 'resolved', label: '已解决' },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setIssueStatusDraft(opt.key)}
+                        className={cn(
+                          'flex-1 px-3 py-2.5 text-sm rounded-xl font-medium transition-all border-2',
+                          issueStatusDraft === opt.key
+                            ? opt.key === 'resolved'
+                              ? 'bg-sage-500 text-white border-sage-500'
+                              : 'bg-amber-500 text-white border-amber-500'
+                            : 'bg-white text-sage-600 border-cream-200 hover:border-sage-300'
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-sage-600 mb-2">
+                    处理说明
+                  </label>
+                  <textarea
+                    value={issueResolutionDraft}
+                    onChange={(e) => setIssueResolutionDraft(e.target.value)}
+                    rows={4}
+                    placeholder="请输入处理说明..."
+                    className="w-full px-4 py-3 rounded-xl bg-white border border-cream-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowIssueModal(false)}
+                    className="flex-1 py-3 rounded-xl bg-cream-200 text-sage-600 font-semibold hover:bg-cream-300 transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleSaveIssue}
+                    className="flex-1 py-3 rounded-xl bg-sage-600 text-white font-semibold hover:bg-sage-700 active:scale-[0.98] transition-all shadow-soft"
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {editOpen && (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft,
@@ -26,12 +26,14 @@ import {
   Star,
   ChevronRight,
   Pencil,
+  CalendarClock,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { format, parseISO, addMinutes } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import type { Appointment, AppointmentStatus, PayType, ConsumptionRecord, Service, Groomer } from '@/types';
+import { computePetCareCycle } from '@/utils/careCycle';
 
 const statusBannerConfig: Record<AppointmentStatus, { bg: string; text: string; label: string; desc: string }> = {
   pending: { bg: 'bg-petal-100', text: 'text-petal-700', label: '待确认', desc: '客户已提交预约，等待您确认' },
@@ -328,7 +330,18 @@ interface CompletePaymentModalProps {
   service: { id: string; name: string; price: number };
   pet?: { name: string; id: string };
   completeAppointment: (id: string, payType: PayType) => { success: boolean; error?: string };
-  createFollowUp: (data: { memberId: string; petId: string; appointmentId: string; petCondition: string; customerFeedback: string; nextCareSuggestion: string }) => void;
+  createFollowUp: (data: {
+    memberId: string;
+    petId: string;
+    appointmentId: string;
+    petCondition: string;
+    customerFeedback: string;
+    nextCareSuggestion: string;
+    hasIssue?: boolean;
+    issueType?: 'unsatisfied' | 'pet_abnormal' | 'other';
+    issueDescription?: string;
+    issueStatus?: 'open' | 'processing' | 'resolved';
+  }) => void;
   showToast: (text: string) => void;
   navigateToList: () => void;
 }
@@ -354,6 +367,9 @@ function CompletePaymentModal({
   const [nextCareSuggestion, setNextCareSuggestion] = useState('');
   const [customSuggestion, setCustomSuggestion] = useState(false);
   const [followUpOpen, setFollowUpOpen] = useState(true);
+  const [hasIssue, setHasIssue] = useState(false);
+  const [issueType, setIssueType] = useState<'unsatisfied' | 'pet_abnormal' | 'other'>('unsatisfied');
+  const [issueDescription, setIssueDescription] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -364,6 +380,9 @@ function CompletePaymentModal({
       setNextCareSuggestion('');
       setCustomSuggestion(false);
       setFollowUpOpen(true);
+      setHasIssue(false);
+      setIssueType('unsatisfied');
+      setIssueDescription('');
     }
   }, [open]);
 
@@ -383,12 +402,13 @@ function CompletePaymentModal({
   const newCredits = selectedPayType === 'credit' ? creditCount - 1 : creditCount;
 
   const hasFollowUpContent = petCondition.trim() || customerFeedback.trim() || nextCareSuggestion.trim();
+  const hasIssueContent = hasIssue && issueDescription.trim();
 
   const handleConfirm = () => {
     if (!selectedPayType) return;
     const res = completeAppointment(apt.id, selectedPayType);
     if (res.success) {
-      if (hasFollowUpContent && pet?.id) {
+      if ((hasFollowUpContent || hasIssueContent) && pet?.id) {
         createFollowUp({
           memberId: apt.memberId,
           petId: pet.id,
@@ -396,6 +416,10 @@ function CompletePaymentModal({
           petCondition: petCondition.trim(),
           customerFeedback: customerFeedback.trim(),
           nextCareSuggestion: nextCareSuggestion.trim(),
+          hasIssue,
+          issueType: hasIssue ? issueType : undefined,
+          issueDescription: hasIssue ? issueDescription.trim() : undefined,
+          issueStatus: hasIssue ? 'open' : 'resolved',
         });
         setCompleteMsg({ type: 'success', text: '服务完成，回访已记录' });
         showToast('服务完成，回访已记录');
@@ -741,6 +765,82 @@ function CompletePaymentModal({
                                 />
                               )}
                             </div>
+
+                            <div className="pt-3 mt-3 border-t border-sage-100">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-sage-600 flex items-center gap-1.5">
+                                  <span>⚠️</span>
+                                  有特殊情况
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => setHasIssue(!hasIssue)}
+                                  className={cn(
+                                    'relative w-11 h-6 rounded-full transition-colors duration-200',
+                                    hasIssue ? 'bg-petal-500' : 'bg-gray-200'
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200',
+                                      hasIssue ? 'translate-x-5' : 'translate-x-0.5'
+                                    )}
+                                  />
+                                </button>
+                              </div>
+                              <AnimatePresence>
+                                {hasIssue && (
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="pt-3 space-y-3">
+                                      <div>
+                                        <label className="block text-[11px] font-semibold text-petal-600 mb-1.5">
+                                          问题类型
+                                        </label>
+                                        <div className="flex gap-2">
+                                          {([
+                                            { key: 'unsatisfied', label: '客户不满意' },
+                                            { key: 'pet_abnormal', label: '宠物异常' },
+                                            { key: 'other', label: '其他' },
+                                          ] as const).map((opt) => (
+                                            <button
+                                              key={opt.key}
+                                              type="button"
+                                              onClick={() => setIssueType(opt.key)}
+                                              className={cn(
+                                                'flex-1 px-2 py-1.5 text-[11px] rounded-lg font-medium transition-all border-2',
+                                                issueType === opt.key
+                                                  ? 'bg-petal-500 text-white border-petal-500'
+                                                  : 'bg-white text-sage-600 border-sage-200 hover:border-petal-300'
+                                              )}
+                                            >
+                                              {opt.label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="block text-[11px] font-semibold text-petal-600 mb-1.5">
+                                          问题描述
+                                        </label>
+                                        <textarea
+                                          value={issueDescription}
+                                          onChange={(e) => setIssueDescription(e.target.value)}
+                                          rows={2}
+                                          placeholder="请描述具体问题..."
+                                          className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-petal-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-petal-400 focus:border-transparent resize-none"
+                                        />
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
                           </div>
                         </motion.div>
                       )}
@@ -774,6 +874,7 @@ function CompletePaymentModal({
 export default function AppointmentDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const appointments = useAppStore((s) => s.appointments);
   const members = useAppStore((s) => s.members);
   const pets = useAppStore((s) => s.pets);
@@ -786,6 +887,7 @@ export default function AppointmentDetail() {
   const completeAppointment = useAppStore((s) => s.completeAppointment);
   const createFollowUp = useAppStore((s) => s.createFollowUp);
   const getFollowUpByAppointment = useAppStore((s) => s.getFollowUpByAppointment);
+  const updateFollowUpIssue = useAppStore((s) => s.updateFollowUpIssue);
   const checkConflict = useAppStore((s) => s.checkConflict);
   const initData = useAppStore((s) => s.initData);
   const initialized = useAppStore((s) => s.initialized);
@@ -808,6 +910,18 @@ export default function AppointmentDetail() {
     [apt, getFollowUpByAppointment, followUpRecords],
   );
 
+  const petCareCycle = useMemo(() => {
+    if (!pet || !member) return null;
+    return computePetCareCycle(
+      pet,
+      member,
+      consumptionRecords,
+      followUpRecords,
+      services,
+      groomers
+    );
+  }, [pet, member, consumptionRecords, followUpRecords, services, groomers]);
+
   const [showComplete, setShowComplete] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -815,6 +929,9 @@ export default function AppointmentDetail() {
   const [followUpPetCondition, setFollowUpPetCondition] = useState('');
   const [followUpCustomerFeedback, setFollowUpCustomerFeedback] = useState('');
   const [followUpNextCare, setFollowUpNextCare] = useState('');
+  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [issueStatusDraft, setIssueStatusDraft] = useState<'processing' | 'resolved'>('processing');
+  const [issueResolutionDraft, setIssueResolutionDraft] = useState('');
   const [actionToast, setActionToast] = useState<string | null>(null);
 
   const isLoading = !initialized || appointments.length === 0;
@@ -879,9 +996,28 @@ export default function AppointmentDetail() {
       petCondition: followUpPetCondition.trim(),
       customerFeedback: followUpCustomerFeedback.trim(),
       nextCareSuggestion: followUpNextCare.trim(),
+      hasIssue: false,
+      issueStatus: 'resolved',
     });
     setShowFollowUp(false);
     showToast('回访已补录');
+  };
+
+  const openIssueModal = () => {
+    if (!followUp) return;
+    setIssueStatusDraft(followUp.issueStatus === 'open' ? 'processing' : followUp.issueStatus as 'processing' | 'resolved');
+    setIssueResolutionDraft(followUp.issueResolution || '');
+    setShowIssueModal(true);
+  };
+
+  const handleSaveIssue = () => {
+    if (!followUp) return;
+    updateFollowUpIssue(followUp.id, {
+      issueStatus: issueStatusDraft,
+      issueResolution: issueResolutionDraft.trim(),
+    });
+    setShowIssueModal(false);
+    showToast('问题处理已更新');
   };
 
   if (isLoading) {
@@ -976,6 +1112,16 @@ export default function AppointmentDetail() {
                   </span>
                   {banner.label}
                 </div>
+                {searchParams.get('from') === 'followup' && (
+                  <div className="inline-flex items-center gap-1 rounded-full px-3 py-1 bg-sky2-100 text-sky2-600 text-xs font-semibold border border-sky2-200">
+                    🔄 来自复购跟进
+                  </div>
+                )}
+                {followUp?.hasIssue && followUp.issueStatus !== 'resolved' && (
+                  <div className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 bg-petal-500 text-white text-xs font-bold shadow-soft animate-pulse">
+                    ⚠️ 待处理
+                  </div>
+                )}
                 {canEdit && (
                   <button
                     onClick={() => setShowEdit(true)}
@@ -1120,6 +1266,37 @@ export default function AppointmentDetail() {
                             </p>
                           </div>
                         )}
+                        {petCareCycle && petCareCycle.nextSuggestedDate && (
+                          <div className="pt-2 border-t border-terracotta-100/60">
+                            <div className="text-[11px] font-medium text-terracotta-600 mb-1 flex items-center gap-1">
+                              <CalendarClock size={11} />
+                              同类下次建议
+                            </div>
+                            <div className="text-[11px] text-sage-600 flex items-center gap-2 flex-wrap">
+                              <span>
+                                {format(petCareCycle.nextSuggestedDate, 'yyyy-MM-dd')}
+                              </span>
+                              <span className="text-sage-400">·</span>
+                              <span>{petCareCycle.nextServiceName}</span>
+                              <span
+                                className={cn(
+                                  'px-1.5 py-0.5 text-[10px] font-semibold rounded-md',
+                                  petCareCycle.status === 'overdue'
+                                    ? 'bg-green-100 text-green-600'
+                                    : petCareCycle.status === 'due_soon'
+                                    ? 'bg-amber-100 text-amber-600'
+                                    : 'bg-gray-100 text-gray-500'
+                                )}
+                              >
+                                {petCareCycle.status === 'overdue'
+                                  ? `已过期${Math.abs(petCareCycle.daysUntilNext)}天`
+                                  : petCareCycle.status === 'due_soon'
+                                  ? `还有${petCareCycle.daysUntilNext}天`
+                                  : `还有${petCareCycle.daysUntilNext}天`}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1225,6 +1402,65 @@ export default function AppointmentDetail() {
               <InfoBlock icon={MessageSquareText} title="📝 服务回访">
                 {followUp ? (
                   <div className="space-y-3">
+                    {followUp.hasIssue && (
+                      <div className="rounded-xl border-2 border-petal-200 bg-gradient-to-br from-petal-50 to-cream-50 p-4">
+                        <div className="flex items-center gap-2 flex-wrap mb-3">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-petal-500 text-white">
+                            ⚠️ 有问题
+                          </span>
+                          {followUp.issueType && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-petal-100 text-petal-700 border border-petal-200">
+                              {followUp.issueType === 'unsatisfied' && '客户不满意'}
+                              {followUp.issueType === 'pet_abnormal' && '宠物异常'}
+                              {followUp.issueType === 'other' && '其他'}
+                            </span>
+                          )}
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold',
+                            followUp.issueStatus === 'open' && 'bg-petal-100 text-petal-600 border border-petal-200',
+                            followUp.issueStatus === 'processing' && 'bg-amber-100 text-amber-700 border border-amber-200',
+                            followUp.issueStatus === 'resolved' && 'bg-sage-100 text-sage-700 border border-sage-200',
+                          )}>
+                            {followUp.issueStatus === 'open' && '待处理'}
+                            {followUp.issueStatus === 'processing' && '处理中'}
+                            {followUp.issueStatus === 'resolved' && '✓ 已解决'}
+                          </span>
+                        </div>
+                        {followUp.issueDescription && (
+                          <div className="p-3 rounded-lg bg-white/70 border border-petal-200/60">
+                            <div className="text-[11px] font-semibold text-petal-600 mb-1">问题描述</div>
+                            <p className="text-sm text-sage-700 leading-relaxed">
+                              {followUp.issueDescription}
+                            </p>
+                          </div>
+                        )}
+                        {followUp.issueStatus === 'resolved' && followUp.issueResolution && (
+                          <div className="mt-3 p-3 rounded-lg bg-sage-50/80 border border-sage-200/60">
+                            <div className="text-[11px] font-semibold text-sage-600 mb-1 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              处理说明
+                            </div>
+                            <p className="text-sm text-sage-700 leading-relaxed">
+                              {followUp.issueResolution}
+                            </p>
+                            {followUp.issueHandledAt && (
+                              <p className="mt-1.5 text-[11px] text-sage-400">
+                                处理时间：{format(new Date(followUp.issueHandledAt), 'yyyy-MM-dd HH:mm')}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {followUp.issueStatus !== 'resolved' && (
+                          <button
+                            onClick={openIssueModal}
+                            className="mt-3 w-full py-2 rounded-lg bg-petal-500 hover:bg-petal-600 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            处理问题
+                          </button>
+                        )}
+                      </div>
+                    )}
                     <div className="rounded-xl border border-sage-100 bg-gradient-to-br from-sage-50/60 to-cream-50 p-4">
                       <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-sage-600">
                         <span className="text-base">👤</span>
@@ -1589,6 +1825,109 @@ export default function AppointmentDetail() {
                   className="flex-1 px-4 py-3 rounded-xl bg-terracotta-400 hover:bg-terracotta-500 text-white text-sm font-semibold shadow-soft transition-all hover:-translate-y-0.5"
                 >
                   保存回访
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showIssueModal && followUp && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-sage-700/30 backdrop-blur-sm p-4"
+            onClick={() => setShowIssueModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-2xl2 bg-white shadow-card-hover overflow-hidden"
+            >
+              <div className="px-6 pt-6 pb-4 flex items-center justify-between border-b border-sage-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-petal-100 flex items-center justify-center">
+                    <AlertCircle className="w-5 h-5 text-petal-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-sage-700">处理问题</h3>
+                    <p className="text-xs text-sage-500 mt-0.5">
+                      {followUp.issueType === 'unsatisfied' && '客户不满意'}
+                      {followUp.issueType === 'pet_abnormal' && '宠物异常'}
+                      {followUp.issueType === 'other' && '其他问题'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowIssueModal(false)}
+                  className="w-9 h-9 rounded-lg hover:bg-cream-100 flex items-center justify-center text-sage-400 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="p-3 rounded-lg bg-petal-50 border border-petal-200">
+                  <div className="text-[11px] font-semibold text-petal-600 mb-1">问题描述</div>
+                  <p className="text-sm text-sage-700 leading-relaxed">
+                    {followUp.issueDescription || '无'}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-sage-600 mb-2">
+                    处理状态
+                  </label>
+                  <div className="flex gap-2">
+                    {([
+                      { key: 'processing', label: '处理中' },
+                      { key: 'resolved', label: '已解决' },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setIssueStatusDraft(opt.key)}
+                        className={cn(
+                          'flex-1 px-3 py-2 text-sm rounded-lg font-medium transition-all border-2',
+                          issueStatusDraft === opt.key
+                            ? opt.key === 'resolved'
+                              ? 'bg-sage-500 text-white border-sage-500'
+                              : 'bg-amber-500 text-white border-amber-500'
+                            : 'bg-white text-sage-600 border-sage-200 hover:border-sage-300'
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                    处理说明
+                  </label>
+                  <textarea
+                    value={issueResolutionDraft}
+                    onChange={(e) => setIssueResolutionDraft(e.target.value)}
+                    rows={4}
+                    placeholder="请输入处理说明..."
+                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-cream-50 border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                  />
+                </div>
+              </div>
+              <div className="px-6 pb-6 pt-2 flex gap-3">
+                <button
+                  onClick={() => setShowIssueModal(false)}
+                  className="flex-1 px-4 py-3 rounded-xl bg-white border border-sage-200 text-sm font-medium text-sage-600 hover:bg-sage-50 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSaveIssue}
+                  className="flex-1 px-4 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-sm font-semibold shadow-soft transition-all hover:-translate-y-0.5"
+                >
+                  保存
                 </button>
               </div>
             </motion.div>

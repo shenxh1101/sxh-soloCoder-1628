@@ -18,6 +18,8 @@ import {
   Check,
   Banknote,
   Smartphone,
+  CalendarClock,
+  PawPrint,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { useAppStore } from '@/store';
@@ -31,6 +33,7 @@ import {
   addDays,
 } from 'date-fns';
 import type { AppointmentStatus, Member, RechargeRule, PaymentMethod } from '@/types';
+import { computeAllPetCareCycles, type PetCareCycle } from '@/utils/careCycle';
 
 const statusConfig: Record<AppointmentStatus, { label: string; className: string; dot: string }> = {
   pending: { label: '待确认', className: 'bg-petal-100 text-petal-400', dot: 'bg-petal-400' },
@@ -433,6 +436,7 @@ export default function Dashboard() {
   const services = useAppStore((s) => s.services);
   const groomers = useAppStore((s) => s.groomers);
   const getMonthlySummary = useAppStore((s) => s.getMonthlySummary);
+  const getOpenIssues = useAppStore((s) => s.getOpenIssues);
 
   const [newMemberOpen, setNewMemberOpen] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
@@ -465,6 +469,25 @@ export default function Dashboard() {
     .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
 
   const lowBalanceMembers = members.filter((m) => m.balance < 100);
+
+  const openIssues = getOpenIssues();
+
+  const consumptionRecords = useAppStore((s) => s.consumptionRecords);
+  const followUpRecords = useAppStore((s) => s.followUpRecords);
+
+  const dueCareCycles = useMemo(() => {
+    const allCycles = computeAllPetCareCycles(
+      pets,
+      members,
+      consumptionRecords,
+      followUpRecords,
+      services,
+      groomers
+    );
+    return allCycles
+      .filter((c) => c.status === 'due_soon' || c.status === 'overdue')
+      .sort((a, b) => a.daysUntilNext - b.daysUntilNext);
+  }, [pets, members, consumptionRecords, followUpRecords, services, groomers]);
 
   const getPet = (id: string) => pets.find((p) => p.id === id);
   const getService = (id: string) => services.find((s) => s.id === id);
@@ -747,6 +770,76 @@ export default function Dashboard() {
 
             <div className="rounded-2xl2 bg-white p-5 shadow-soft">
               <div className="mb-4 flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-petal-50">
+                  <span className="text-base">⚠️</span>
+                </div>
+                <h3 className="text-base font-semibold text-sage-700">待处理问题</h3>
+                <span className="ml-auto rounded-full bg-petal-500 px-2 py-0.5 text-xs font-medium text-white">
+                  {openIssues.length} 项
+                </span>
+              </div>
+              {openIssues.length === 0 ? (
+                <div className="py-8 text-center text-sm text-sage-400">暂无待处理问题 ✨</div>
+              ) : (
+                <div className="space-y-2">
+                  {openIssues.slice(0, 3).map((issue) => {
+                    const pet = getPet(issue.petId);
+                    const member = getMember(issue.memberId);
+                    return (
+                      <div
+                        key={issue.id}
+                        onClick={() => navigate(`/appointments/${issue.appointmentId}`)}
+                        className="group rounded-xl border-2 border-petal-100 bg-petal-50/60 p-3 transition-all hover:border-petal-300 hover:bg-white hover:shadow-soft cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                          <span className="text-[11px] font-bold text-petal-600">
+                            🐾 {pet?.name || '未知'}
+                          </span>
+                          <span className="text-[11px] text-sage-500">
+                            👤 {member?.name || '未知'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold',
+                            issue.issueType === 'unsatisfied' && 'bg-petal-100 text-petal-600 border border-petal-200',
+                            issue.issueType === 'pet_abnormal' && 'bg-amber-100 text-amber-700 border border-amber-200',
+                            issue.issueType === 'other' && 'bg-gray-100 text-gray-600 border border-gray-200',
+                            !issue.issueType && 'bg-gray-100 text-gray-500',
+                          )}>
+                            {issue.issueType === 'unsatisfied' && '客户不满意'}
+                            {issue.issueType === 'pet_abnormal' && '宠物异常'}
+                            {issue.issueType === 'other' && '其他'}
+                            {!issue.issueType && '问题'}
+                          </span>
+                          <span className={cn(
+                            'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold',
+                            issue.issueStatus === 'open' && 'bg-petal-100 text-petal-600',
+                            issue.issueStatus === 'processing' && 'bg-amber-100 text-amber-700',
+                          )}>
+                            {issue.issueStatus === 'open' && '待处理'}
+                            {issue.issueStatus === 'processing' && '处理中'}
+                          </span>
+                        </div>
+                        {issue.issueDescription && (
+                          <p className="mt-1.5 text-xs text-sage-600 line-clamp-1">
+                            {issue.issueDescription}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {openIssues.length > 3 && (
+                    <div className="pt-1 text-center">
+                      <p className="text-[11px] text-sage-400">还有 {openIssues.length - 3} 项待处理...</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl2 bg-white p-5 shadow-soft">
+              <div className="mb-4 flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky2-50">
                   <AlertTriangle size={16} className="text-sky2-400" />
                 </div>
@@ -787,6 +880,87 @@ export default function Dashboard() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl2 bg-white p-5 shadow-soft">
+              <div className="mb-4 flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sage-50">
+                  <CalendarClock size={16} className="text-sage-500" />
+                </div>
+                <h3 className="text-base font-semibold text-sage-700">📌 待跟进护理</h3>
+                <span className="ml-auto rounded-full bg-sage-100 px-2 py-0.5 text-xs font-medium text-sage-600">
+                  {dueCareCycles.length} 只
+                </span>
+              </div>
+              {dueCareCycles.length === 0 ? (
+                <div className="py-8 text-center text-sm text-sage-400">
+                  近期无待跟进护理，客户都很准时🐾
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {dueCareCycles.slice(0, 6).map((cycle) => {
+                    const isOverdue = cycle.status === 'overdue';
+                    return (
+                      <div
+                        key={cycle.petId}
+                        className={cn(
+                          'group rounded-xl border p-3 transition-all hover:shadow-soft',
+                          isOverdue
+                            ? 'border-green-100/50 bg-green-50/40 hover:border-green-200 hover:bg-white'
+                            : 'border-amber-100/50 bg-amber-50/40 hover:border-amber-200 hover:bg-white'
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-sage-700 text-sm flex items-center gap-1">
+                                <PawPrint size={12} className={isOverdue ? 'text-green-500' : 'text-amber-500'} />
+                                {cycle.petName}
+                              </span>
+                              <span
+                                className={cn(
+                                  'px-1.5 py-0.5 text-[10px] font-semibold rounded-md',
+                                  isOverdue
+                                    ? 'bg-green-100 text-green-600'
+                                    : 'bg-amber-100 text-amber-600'
+                                )}
+                              >
+                                {isOverdue
+                                  ? `过期${Math.abs(cycle.daysUntilNext)}天`
+                                  : `还有${cycle.daysUntilNext}天`}
+                              </span>
+                            </div>
+                            <p className="text-xs text-sage-500 mt-1 truncate">
+                              👤 {cycle.memberName} · {cycle.nextServiceName}
+                            </p>
+                            <p className="text-[11px] text-sage-400 mt-0.5">
+                              建议：{cycle.nextSuggestedDate ? format(cycle.nextSuggestedDate, 'MM-dd') : '暂无'}
+                            </p>
+                          </div>
+                          {cycle.nextServiceId && (
+                            <button
+                              onClick={() => {
+                                const params = new URLSearchParams();
+                                params.set('petId', cycle.petId);
+                                params.set('serviceId', cycle.nextServiceId);
+                                if (cycle.lastGroomerId) {
+                                  params.set('groomerId', cycle.lastGroomerId);
+                                }
+                                params.set('quickReorder', '1');
+                                navigate(`/appointments/new?${params.toString()}`);
+                              }}
+                              className="shrink-0 text-[11px] font-medium px-2.5 py-1.5 rounded-full bg-terracotta-400 text-white hover:bg-terracotta-500 transition-all flex items-center gap-1"
+                            >
+                              <CalendarDays size={10} />
+                              快速预约
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -44,6 +44,7 @@ import {
   eachDayOfInterval,
   addMinutes,
   addHours,
+  addDays,
 } from 'date-fns';
 
 let _smsIntervalStarted = false;
@@ -100,9 +101,12 @@ interface AppState {
 
   exchangePoints: (memberId: string, itemType: 'service' | 'product', itemName: string, pointsCost: number, itemId?: string) => { success: boolean; error?: string };
 
-  createFollowUp: (data: Omit<FollowUpRecord, 'id' | 'createdAt'>) => FollowUpRecord;
+  createFollowUp: (data: Omit<FollowUpRecord, 'id' | 'createdAt' | 'hasIssue' | 'issueStatus'> & Partial<Pick<FollowUpRecord, 'hasIssue' | 'issueStatus'>>) => FollowUpRecord;
   getFollowUpsByMember: (memberId: string) => FollowUpRecord[];
   getFollowUpByAppointment: (appointmentId: string) => FollowUpRecord | undefined;
+  updateFollowUpIssue: (id: string, data: Partial<Pick<FollowUpRecord, 'issueStatus' | 'issueResolution' | 'issueType' | 'issueDescription' | 'hasIssue'>>) => void;
+  getOpenIssueCount: () => number;
+  getOpenIssues: () => FollowUpRecord[];
 
   getMonthlyRechargeStats: (year: number, month: number) => DailyStat[];
   getMonthlyServiceStats: (year: number, month: number) => ServiceStat[];
@@ -224,8 +228,14 @@ export const useAppStore = create<AppState>()(
             '3周后药浴护理，注意皮肤保湿',
             '下月做SPA护理，平时注意每日梳毛',
           ];
+          const mockIssues = [
+            { hasIssue: true, issueType: 'unsatisfied' as const, issueDescription: '客户对造型不满意，觉得耳朵剪得太短了', issueStatus: 'open' as const },
+            { hasIssue: true, issueType: 'pet_abnormal' as const, issueDescription: '宠物洗完澡后皮肤发红，有轻微过敏症状', issueStatus: 'resolved' as const, issueResolution: '已建议客户带宠物去医院检查，赠送下次药浴护理一次', issueHandledAt: addDays(new Date(), -1).toISOString() },
+            { hasIssue: false, issueStatus: 'resolved' as const },
+          ];
           completedConsumptions.forEach((c, i) => {
             if (c.memberId && c.petId && c.appointmentId) {
+              const issueData = mockIssues[i % mockIssues.length];
               followUpRecords.push({
                 id: uid(),
                 memberId: c.memberId,
@@ -235,6 +245,7 @@ export const useAppStore = create<AppState>()(
                 customerFeedback: mockFeedbacks[i % mockFeedbacks.length],
                 nextCareSuggestion: mockSuggestions[i % mockSuggestions.length],
                 createdAt: c.createdAt,
+                ...issueData,
               });
             }
           });
@@ -561,6 +572,8 @@ export const useAppStore = create<AppState>()(
         const s = get();
         const followUp: FollowUpRecord = {
           id: uid(),
+          hasIssue: false,
+          issueStatus: 'open',
           ...data,
           createdAt: new Date().toISOString(),
         };
@@ -578,6 +591,29 @@ export const useAppStore = create<AppState>()(
 
       getFollowUpByAppointment: (appointmentId) => {
         return get().followUpRecords.find((f) => f.appointmentId === appointmentId);
+      },
+
+      updateFollowUpIssue: (id, data) => {
+        set((st) => ({
+          followUpRecords: st.followUpRecords.map((f) => {
+            if (f.id !== id) return f;
+            const updated = { ...f, ...data };
+            if (data.issueStatus === 'resolved' && !f.issueHandledAt) {
+              updated.issueHandledAt = new Date().toISOString();
+            }
+            return updated;
+          }),
+        }));
+      },
+
+      getOpenIssueCount: () => {
+        return get().followUpRecords.filter((f) => f.hasIssue && f.issueStatus !== 'resolved').length;
+      },
+
+      getOpenIssues: () => {
+        return get()
+          .followUpRecords.filter((f) => f.hasIssue && f.issueStatus !== 'resolved')
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       },
 
       getMonthlyRechargeStats: (year, month) => {
