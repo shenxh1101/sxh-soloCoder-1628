@@ -44,14 +44,13 @@ const PIE_COLORS = [
 export default function Reports() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  const {
-    getMonthlyRechargeStats,
-    getMonthlyServiceStats,
-    getTopServices,
-    getTopGroomers,
-    getMonthlySummary,
-    groomers,
-  } = useAppStore();
+  const getMonthlyRechargeStats = useAppStore((s) => s.getMonthlyRechargeStats);
+  const getMonthlyServiceStats = useAppStore((s) => s.getMonthlyServiceStats);
+  const getTopServices = useAppStore((s) => s.getTopServices);
+  const getTopGroomers = useAppStore((s) => s.getTopGroomers);
+  const getMonthlySummary = useAppStore((s) => s.getMonthlySummary);
+  const groomers = useAppStore((s) => s.groomers);
+  const initData = useAppStore((s) => s.initData);
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();

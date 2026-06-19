@@ -318,6 +318,8 @@ export default function MemberDetail() {
   const consumptionRecords = useAppStore((s) => s.consumptionRecords);
   const pointsRecords = useAppStore((s) => s.pointsRecords);
   const updateMember = useAppStore((s) => s.updateMember);
+  const rechargeMember = useAppStore((s) => s.rechargeMember);
+  const createPet = useAppStore((s) => s.createPet);
   const initData = useAppStore((s) => s.initData);
 
   const [activeTab, setActiveTab] = useState<TabKey>('pets');
@@ -420,6 +422,16 @@ export default function MemberDetail() {
   };
 
   if (!member) {
+    if (members.length === 0) {
+      return (
+        <div className="min-h-screen bg-cream-100 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-10 h-10 mx-auto mb-4 border-4 border-sage-200 border-t-sage-500 rounded-full animate-spin" />
+            <p className="text-sage-500 text-sm font-medium">加载中...</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-cream-100 flex items-center justify-center">
         <div className="text-center">

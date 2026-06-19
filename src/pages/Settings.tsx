@@ -50,38 +50,27 @@ export default function Settings() {
   const [ruleForm, setRuleForm] = useState<RuleFormData>(emptyRuleForm);
   const [resetConfirm, setResetConfirm] = useState(false);
 
-  const [smsEnabled, setSmsEnabled] = useState(true);
-  const [remindTime, setRemindTime] = useState('1h');
   const [notifyPermission, setNotifyPermission] = useState<NotificationPermission>('default');
 
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const {
-    rechargeRules,
-    services,
-    createRechargeRule,
-    updateRechargeRule,
-    deleteRechargeRule,
-    resetAll,
-  } = useAppStore();
+  const rechargeRules = useAppStore((s) => s.rechargeRules);
+  const services = useAppStore((s) => s.services);
+  const createRechargeRule = useAppStore((s) => s.createRechargeRule);
+  const updateRechargeRule = useAppStore((s) => s.updateRechargeRule);
+  const deleteRechargeRule = useAppStore((s) => s.deleteRechargeRule);
+  const resetAll = useAppStore((s) => s.resetAll);
+  const initData = useAppStore((s) => s.initData);
+  const smsEnabled = useAppStore((s) => s.smsEnabled);
+  const remindOffset = useAppStore((s) => s.remindOffset);
+  const setSmsEnabled = useAppStore((s) => s.setSmsEnabled);
+  const setRemindOffset = useAppStore((s) => s.setRemindOffset);
 
   useEffect(() => {
-    const saved = localStorage.getItem('settings_sms');
-    if (saved !== null) setSmsEnabled(saved === 'true');
-    const savedTime = localStorage.getItem('settings_remind');
-    if (savedTime) setRemindTime(savedTime);
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setNotifyPermission(Notification.permission);
     }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('settings_sms', String(smsEnabled));
-  }, [smsEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('settings_remind', remindTime);
-  }, [remindTime]);
 
   const availableServices = useMemo(
     () => services.filter((s) => s.isActive),
@@ -427,8 +416,8 @@ export default function Settings() {
               </div>
               <div className="relative">
                 <select
-                  value={remindTime}
-                  onChange={(e) => setRemindTime(e.target.value)}
+                  value={remindOffset}
+                  onChange={(e) => setRemindOffset(e.target.value)}
                   className="appearance-none pl-4 pr-10 py-2.5 rounded-xl border-2 border-cream-200 focus:border-sage-400 focus:outline-none transition-colors text-sm text-sage-700 bg-white cursor-pointer"
                 >
                   {remindOptions.map((opt) => (

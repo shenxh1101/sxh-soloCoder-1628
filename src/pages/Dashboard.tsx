@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
   CalendarDays,
@@ -13,7 +13,13 @@ import {
   Bell,
   AlertTriangle,
   ChevronRight,
+  X,
+  Search,
+  Check,
+  Banknote,
+  Smartphone,
 } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
 import {
@@ -24,7 +30,7 @@ import {
   endOfDay,
   addDays,
 } from 'date-fns';
-import type { AppointmentStatus } from '@/types';
+import type { AppointmentStatus, Member, RechargeRule, PaymentMethod } from '@/types';
 
 const statusConfig: Record<AppointmentStatus, { label: string; className: string; dot: string }> = {
   pending: { label: '待确认', className: 'bg-petal-100 text-petal-400', dot: 'bg-petal-400' },
@@ -47,16 +53,395 @@ const item = {
   show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: 'easeOut' } },
 };
 
+type NewMemberForm = {
+  name: string;
+  phone: string;
+};
+
+function NewMemberModal({
+  open,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const createMember = useAppStore((s) => s.createMember);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<NewMemberForm>();
+
+  const onSubmit = (data: NewMemberForm) => {
+    createMember(data);
+    reset();
+    onClose();
+    onSuccess('会员添加成功');
+  };
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+          <motion.div
+            className="relative w-full max-w-md bg-cream-50 rounded-2xl2 shadow-card-hover"
+            initial={{ scale: 0.95, y: 20, opacity: 0 }}
+            animate={{ scale: 1, y: 0, opacity: 1 }}
+            exit={{ scale: 0.95, y: 20, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-cream-200">
+              <h2 className="text-xl font-bold text-sage-700">新增会员</h2>
+              <button
+                onClick={onClose}
+                className="p-2 rounded-xl hover:bg-cream-200 text-sage-500 hover:text-sage-700 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-sage-600 mb-1.5">
+                  姓名 <span className="text-terracotta-500">*</span>
+                </label>
+                <input
+                  {...register('name', { required: '请输入姓名' })}
+                  className="w-full px-4 py-2.5 rounded-xl bg-white border border-cream-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent"
+                  placeholder="请输入会员姓名"
+                />
+                {errors.name && <p className="text-xs text-terracotta-500 mt-1">{errors.name.message}</p>}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-sage-600 mb-1.5">
+                  手机号 <span className="text-terracotta-500">*</span>
+                </label>
+                <input
+                  {...register('phone', {
+                    required: '请输入手机号',
+                    pattern: { value: /^1\d{10}$/, message: '请输入正确的11位手机号' },
+                  })}
+                  className="w-full px-4 py-2.5 rounded-xl bg-white border border-cream-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent"
+                  placeholder="请输入11位手机号"
+                />
+                {errors.phone && <p className="text-xs text-terracotta-500 mt-1">{errors.phone.message}</p>}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-3 rounded-xl bg-cream-200 text-sage-600 font-semibold hover:bg-cream-300 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 rounded-xl bg-sage-500 text-white font-semibold hover:bg-sage-600 active:scale-[0.98] transition-all shadow-soft"
+                >
+                  确认添加
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function RechargeRuleCard({
+  rule,
+  selected,
+  onClick,
+}: {
+  rule: RechargeRule;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'relative text-left p-4 rounded-2xl border-2 transition-all',
+        selected
+          ? 'border-sage-500 bg-white shadow-soft-lg scale-[1.02]'
+          : 'border-cream-200 bg-white hover:border-sage-300 hover:shadow-soft'
+      )}
+    >
+      {rule.tag && (
+        <span className="absolute -top-2 -right-2 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-terracotta-400 text-white shadow-soft">
+          {rule.tag}
+        </span>
+      )}
+      <div className="flex items-baseline gap-1 mb-2">
+        <span className="text-2xl font-bold text-sage-700">¥{rule.amount}</span>
+      </div>
+      {rule.bonusAmount > 0 && (
+        <div className="text-sm text-green-600 font-semibold mb-1">
+          赠 ¥{rule.bonusAmount}
+        </div>
+      )}
+      {rule.bonusCredits.length > 0 && (
+        <div className="space-y-0.5">
+          {rule.bonusCredits.map((bc, i) => (
+            <div key={i} className="text-xs text-sage-500">
+              赠 <span className="text-green-600 font-medium">{bc.serviceName}</span> ×{bc.count}
+            </div>
+          ))}
+        </div>
+      )}
+      {selected && (
+        <div className="absolute top-3 left-3 w-5 h-5 rounded-full bg-sage-500 flex items-center justify-center">
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+      )}
+    </button>
+  );
+}
+
+function QuickRechargeModal({
+  open,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const members = useAppStore((s) => s.members);
+  const rechargeRules = useAppStore((s) => s.rechargeRules);
+  const rechargeMember = useAppStore((s) => s.rechargeMember);
+
+  const [memberSearch, setMemberSearch] = useState('');
+  const [selectedMemberId, setSelectedMemberId] = useState('');
+  const [selectedRule, setSelectedRule] = useState<string | null>(null);
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('微信');
+
+  const filteredMembers = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter(
+      (m) => m.name.toLowerCase().includes(q) || m.phone.includes(q)
+    );
+  }, [members, memberSearch]);
+
+  const activeRules = rechargeRules.filter((r) => r.isActive);
+
+  const selectedMember = members.find((m) => m.id === selectedMemberId) || null;
+  const selectedRuleData = activeRules.find((r) => r.id === selectedRule) || null;
+
+  const resetAndClose = () => {
+    setMemberSearch('');
+    setSelectedMemberId('');
+    setSelectedRule(null);
+    setPayMethod('微信');
+    onClose();
+  };
+
+  const handleConfirm = () => {
+    if (!selectedMemberId) return;
+    if (!selectedRule) return;
+    try {
+      const rec = rechargeMember(selectedMemberId, selectedRule, payMethod);
+      onSuccess(`充值成功：${rec.amount + rec.bonusAmount}元`);
+      resetAndClose();
+    } catch (e) {
+      onSuccess('充值失败');
+    }
+  };
+
+  const payOptions: { value: PaymentMethod; icon: typeof Banknote; label: string }[] = [
+    { value: '现金', icon: Banknote, label: '现金' },
+    { value: '微信', icon: Smartphone, label: '微信' },
+    { value: '支付宝', icon: CreditCard, label: '支付宝' },
+    { value: '刷卡', icon: CreditCard, label: '刷卡' },
+  ];
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={resetAndClose} />
+          <motion.div
+            className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-cream-50 rounded-2xl2 shadow-card-hover"
+            initial={{ scale: 0.95, y: 20, opacity: 0 }}
+            animate={{ scale: 1, y: 0, opacity: 1 }}
+            exit={{ scale: 0.95, y: 20, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-between p-6 bg-cream-50 border-b border-cream-200 rounded-t-2xl2">
+              <div>
+                <h2 className="text-xl font-bold text-sage-700">快速充值</h2>
+                {selectedMember && (
+                  <p className="text-sm text-sage-500 mt-0.5">
+                    {selectedMember.name} · 当前余额 ¥{selectedMember.balance.toFixed(2)}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={resetAndClose}
+                className="p-2 rounded-xl hover:bg-cream-200 text-sage-500 hover:text-sage-700 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-sage-600 mb-3">选择会员</h3>
+                <div className="relative">
+                  <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-sage-400" />
+                  <input
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder="搜索姓名或手机号..."
+                    className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-cream-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent shadow-soft"
+                  />
+                </div>
+                <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-cream-100 divide-y divide-cream-50 bg-white">
+                  {filteredMembers.map((m: Member) => (
+                    <button
+                      key={m.id}
+                      onClick={() => setSelectedMemberId(m.id)}
+                      className={cn(
+                        'w-full flex items-center gap-3 p-3 text-left hover:bg-cream-50 transition-colors',
+                        selectedMemberId === m.id && 'bg-sage-50'
+                      )}
+                    >
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-sage-200 to-petal-100 flex items-center justify-center font-medium text-sage-700">
+                        {m.name[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-sage-700 truncate">
+                          {m.name} · {m.phone}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-xs text-sage-400">余额</div>
+                        <div className="text-sm font-semibold text-terracotta-500">
+                          ¥{m.balance}
+                        </div>
+                      </div>
+                      {selectedMemberId === m.id && (
+                        <Check className="w-4 h-4 text-sage-500" />
+                      )}
+                    </button>
+                  ))}
+                  {filteredMembers.length === 0 && (
+                    <div className="p-4 text-center text-sm text-sage-400">
+                      未找到会员
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-sage-600 mb-3">选择充值档位</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {activeRules.map((rule) => (
+                    <RechargeRuleCard
+                      key={rule.id}
+                      rule={rule}
+                      selected={selectedRule === rule.id}
+                      onClick={() => setSelectedRule(rule.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-sage-600 mb-3">支付方式</h3>
+                <div className="grid grid-cols-4 gap-3">
+                  {payOptions.map((opt) => {
+                    const Icon = opt.icon;
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => setPayMethod(opt.value)}
+                        className={cn(
+                          'flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all',
+                          payMethod === opt.value
+                            ? 'border-sage-500 bg-sage-50 text-sage-700'
+                            : 'border-cream-200 bg-white text-sage-500 hover:border-sage-300'
+                        )}
+                      >
+                        <Icon size={20} />
+                        <span className="text-sm font-medium">{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {selectedRuleData && (
+                <div className="p-4 bg-white rounded-xl border border-cream-200">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-sage-500">实付金额</span>
+                    <span className="font-semibold text-sage-700">
+                      ¥{selectedRuleData.amount.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-sage-500">到账总额</span>
+                    <span className="font-semibold text-terracotta-500">
+                      ¥{(selectedRuleData.amount + selectedRuleData.bonusAmount).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleConfirm}
+                disabled={!selectedMemberId || !selectedRule}
+                className="w-full py-3.5 rounded-xl bg-sage-500 text-white font-semibold hover:bg-sage-600 active:scale-[0.98] transition-all shadow-soft disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                确认充值
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const initData = useAppStore((s) => s.initData);
+
+  const appointments = useAppStore((s) => s.appointments);
+  const members = useAppStore((s) => s.members);
+  const pets = useAppStore((s) => s.pets);
+  const services = useAppStore((s) => s.services);
+  const groomers = useAppStore((s) => s.groomers);
   const getMonthlySummary = useAppStore((s) => s.getMonthlySummary);
 
-  useEffect(() => {
-    initData();
-  }, [initData]);
+  const [newMemberOpen, setNewMemberOpen] = useState(false);
+  const [rechargeOpen, setRechargeOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const { appointments, members, pets, services, groomers } = useAppStore.getState();
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2000);
+  };
 
   const now = new Date();
   const summary = getMonthlySummary(now.getFullYear(), now.getMonth());
@@ -123,10 +508,10 @@ export default function Dashboard() {
   ];
 
   const quickActions = [
-    { label: '新建预约', icon: PlusCircle, color: 'bg-sage-500 hover:bg-sage-600', to: '/appointments/new' },
-    { label: '新增会员', icon: UserPlus, color: 'bg-terracotta-400 hover:bg-terracotta-500', to: '/members/new' },
-    { label: '快速充值', icon: CreditCard, color: 'bg-sky2-400 hover:bg-sky2-300', to: '/recharge' },
-    { label: '完成服务', icon: CheckCircle2, color: 'bg-petal-300 hover:bg-petal-400', to: '/appointments' },
+    { label: '新建预约', icon: PlusCircle, color: 'bg-sage-500 hover:bg-sage-600', onClick: () => navigate('/appointments/new') },
+    { label: '新增会员', icon: UserPlus, color: 'bg-terracotta-400 hover:bg-terracotta-500', onClick: () => setNewMemberOpen(true) },
+    { label: '快速充值', icon: CreditCard, color: 'bg-sky2-400 hover:bg-sky2-300', onClick: () => setRechargeOpen(true) },
+    { label: '完成服务', icon: CheckCircle2, color: 'bg-petal-300 hover:bg-petal-400', onClick: () => navigate('/appointments') },
   ];
 
   return (
@@ -193,7 +578,7 @@ export default function Dashboard() {
             {quickActions.map((act) => (
               <button
                 key={act.label}
-                onClick={() => navigate(act.to)}
+                onClick={act.onClick}
                 className={cn(
                   'flex flex-col items-center gap-2 rounded-xl2 py-4 text-white shadow-soft transition-all duration-200',
                   'hover:-translate-y-0.5 hover:shadow-card-hover active:translate-y-0',
@@ -271,7 +656,10 @@ export default function Dashboard() {
                               cfg.dot
                             )}
                           />
-                          <div className="flex-1 rounded-xl2 border border-cream-200/70 bg-cream-50/50 p-4 transition-all duration-200 hover:border-sage-200 hover:bg-white hover:shadow-soft">
+                          <div
+                            onClick={() => navigate(`/appointments/${apt.id}`)}
+                            className="flex-1 rounded-xl2 border border-cream-200/70 bg-cream-50/50 p-4 transition-all duration-200 hover:border-sage-200 hover:bg-white hover:shadow-soft cursor-pointer"
+                          >
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <div className="flex items-center gap-2">
@@ -405,6 +793,31 @@ export default function Dashboard() {
           </motion.div>
         </div>
       </div>
+
+      <NewMemberModal
+        open={newMemberOpen}
+        onClose={() => setNewMemberOpen(false)}
+        onSuccess={showToast}
+      />
+
+      <QuickRechargeModal
+        open={rechargeOpen}
+        onClose={() => setRechargeOpen(false)}
+        onSuccess={showToast}
+      />
+
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-[60] px-5 py-3 bg-sage-700 text-white rounded-xl shadow-soft-lg font-medium"
+          >
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

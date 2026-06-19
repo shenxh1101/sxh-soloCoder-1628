@@ -59,7 +59,12 @@ export default function PointsCenter() {
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const { members, services, exchangeRecords, exchangePoints } = useAppStore();
+  const members = useAppStore((s) => s.members);
+  const services = useAppStore((s) => s.services);
+  const exchangeRecords = useAppStore((s) => s.exchangeRecords);
+  const pointsRecords = useAppStore((s) => s.pointsRecords);
+  const exchangePoints = useAppStore((s) => s.exchangePoints);
+  const initData = useAppStore((s) => s.initData);
 
   const totalPoints = useMemo(
     () => members.reduce((sum, m) => sum + m.points, 0),

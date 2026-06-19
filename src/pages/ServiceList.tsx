@@ -57,7 +57,10 @@ export default function ServiceList() {
   const [form, setForm] = useState<ServiceFormData>(emptyForm);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const { services, createService, updateService } = useAppStore();
+  const services = useAppStore((s) => s.services);
+  const createService = useAppStore((s) => s.createService);
+  const updateService = useAppStore((s) => s.updateService);
+  const initData = useAppStore((s) => s.initData);
 
   const grouped = useMemo(() => {
     const map = new Map<ServiceCategory, Service[]>();

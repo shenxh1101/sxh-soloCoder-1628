@@ -42,7 +42,10 @@ import {
   format,
   eachDayOfInterval,
   addMinutes,
+  addHours,
 } from 'date-fns';
+
+let _smsIntervalStarted = false;
 
 interface AppState {
   appointments: Appointment[];
@@ -56,9 +59,14 @@ interface AppState {
   pointsRecords: PointsRecord[];
   exchangeRecords: ExchangeRecord[];
   initialized: boolean;
+  smsEnabled: boolean;
+  remindOffset: string;
 
   initData: () => void;
   resetAll: () => void;
+  setSmsEnabled: (v: boolean) => void;
+  setRemindOffset: (v: string) => void;
+  processPendingSms: () => void;
 
   createAppointment: (data: {
     memberId: string;
@@ -113,6 +121,69 @@ export const useAppStore = create<AppState>()(
       pointsRecords: [],
       exchangeRecords: [],
       initialized: false,
+      smsEnabled: (() => {
+        if (typeof window === 'undefined') return true;
+        return localStorage.getItem('pet_sms_enabled') !== '0';
+      })(),
+      remindOffset: (() => {
+        if (typeof window === 'undefined') return '2h';
+        return localStorage.getItem('pet_remind_offset') || '2h';
+      })(),
+
+      setSmsEnabled: (v) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('pet_sms_enabled', v ? '1' : '0');
+        }
+        set({ smsEnabled: v });
+        get().processPendingSms();
+      },
+
+      setRemindOffset: (v) => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('pet_remind_offset', v);
+        }
+        set({ remindOffset: v });
+        get().processPendingSms();
+      },
+
+      processPendingSms: () => {
+        const s = get();
+        if (!s.smsEnabled) return;
+
+        const now = new Date();
+        let threshold: Date;
+        switch (s.remindOffset) {
+          case '1h':
+            threshold = addHours(now, 1);
+            break;
+          case '2h':
+            threshold = addHours(now, 2);
+            break;
+          case '12h':
+            threshold = addHours(now, 12);
+            break;
+          case '24h':
+            threshold = addHours(now, 24);
+            break;
+          default:
+            threshold = addHours(now, 2);
+        }
+        const lowerBound = addMinutes(now, -30);
+
+        const updatedApts = s.appointments.map((a) => {
+          if (a.status === 'cancelled') return a;
+          if (a.smsStatus !== 'pending') return a;
+          const startAt = new Date(a.startAt);
+          if (startAt <= threshold && startAt >= lowerBound) {
+            return { ...a, smsStatus: 'sent' as const };
+          }
+          return a;
+        });
+
+        if (updatedApts.some((a, i) => a.smsStatus !== s.appointments[i].smsStatus)) {
+          set({ appointments: updatedApts });
+        }
+      },
 
       initData: () => {
         const s = get();
@@ -130,6 +201,13 @@ export const useAppStore = create<AppState>()(
           exchangeRecords: initExchangeRecords(),
           initialized: true,
         });
+        get().processPendingSms();
+        if (!_smsIntervalStarted) {
+          _smsIntervalStarted = true;
+          setInterval(() => {
+            get().processPendingSms();
+          }, 60 * 1000);
+        }
       },
 
       resetAll: () => {
@@ -175,6 +253,7 @@ export const useAppStore = create<AppState>()(
           createdAt: new Date().toISOString(),
         };
         set({ appointments: [apt, ...s.appointments] });
+        get().processPendingSms();
         return { success: true };
       },
 

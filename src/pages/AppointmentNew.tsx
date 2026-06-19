@@ -73,18 +73,16 @@ function Avatar({ name, className }: { name: string; className?: string }) {
 
 export default function AppointmentNew() {
   const navigate = useNavigate();
-  const {
-    members,
-    pets,
-    services,
-    groomers,
-    appointments,
-    createAppointment,
-    checkConflict,
-    createMember,
-    createPet,
-    initData,
-  } = useAppStore();
+  const members = useAppStore((s) => s.members);
+  const pets = useAppStore((s) => s.pets);
+  const services = useAppStore((s) => s.services);
+  const groomers = useAppStore((s) => s.groomers);
+  const appointments = useAppStore((s) => s.appointments);
+  const createAppointment = useAppStore((s) => s.createAppointment);
+  const checkConflict = useAppStore((s) => s.checkConflict);
+  const createMember = useAppStore((s) => s.createMember);
+  const createPet = useAppStore((s) => s.createPet);
+  const initData = useAppStore((s) => s.initData);
 
   useEffect(() => {
     initData();
@@ -272,7 +270,7 @@ export default function AppointmentNew() {
     });
     setSubmitting(false);
     if (result.success) {
-      const lastCreated = useAppStore.getState().appointments[0];
+      const lastCreated = appointments[0];
       setToast('预约创建成功！');
       setTimeout(() => {
         navigate(`/appointments/${lastCreated.id}`);

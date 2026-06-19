@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -75,13 +75,13 @@ type FinderFn<T> = (id: string) => T | undefined;
 
 export default function AppointmentList() {
   const navigate = useNavigate();
-  const initData = useAppStore((s) => s.initData);
+  const appointments = useAppStore((s) => s.appointments);
+  const members = useAppStore((s) => s.members);
+  const pets = useAppStore((s) => s.pets);
+  const services = useAppStore((s) => s.services);
+  const groomers = useAppStore((s) => s.groomers);
   const cancelAppointment = useAppStore((s) => s.cancelAppointment);
   const completeAppointment = useAppStore((s) => s.completeAppointment);
-
-  useEffect(() => {
-    initData();
-  }, [initData]);
 
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [cursor, setCursor] = useState(new Date());
@@ -92,8 +92,6 @@ export default function AppointmentList() {
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [completeModal, setCompleteModal] = useState<Appointment | null>(null);
   const [completeMsg, setCompleteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  const { appointments, members, pets, services, groomers } = useAppStore.getState();
 
   const getPet: FinderFn<Pet> = (id) => pets.find((p) => p.id === id);
   const getMember: FinderFn<Member> = (id) => members.find((m) => m.id === id);
@@ -254,6 +252,12 @@ export default function AppointmentList() {
               >
                 <ChevronLeft size={18} />
               </button>
+              <button
+                onClick={() => setCursor(new Date())}
+                className="flex h-8 items-center justify-center rounded-lg px-2 text-xs font-semibold text-sage-600 transition-colors hover:bg-cream-100"
+              >
+                今天
+              </button>
               <span className="min-w-[130px] px-2 text-center text-sm font-semibold text-sage-700">{headerLabel}</span>
               <button
                 onClick={goNext}
@@ -321,6 +325,7 @@ export default function AppointmentList() {
               getService={getService}
               getGroomer={getGroomer}
               conflicts={conflicts}
+              navigate={navigate}
             />
           ) : (
             <>
@@ -386,8 +391,12 @@ export default function AppointmentList() {
                           return (
                             <div
                               key={a.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate('/appointments/' + a.id);
+                              }}
                               className={cn(
-                                'flex items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium text-white',
+                                'flex cursor-pointer items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium text-white',
                                 cfg.bg,
                                 a.status === 'cancelled' && 'opacity-60 line-through',
                                 isConflict && 'ring-1 ring-terracotta-500 ring-offset-0.5'
@@ -430,6 +439,7 @@ export default function AppointmentList() {
                   getGroomer={getGroomer}
                   conflicts={conflicts}
                   compact
+                  navigate={navigate}
                 />
               </motion.div>
             )}
@@ -488,7 +498,8 @@ export default function AppointmentList() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        className="flex items-center gap-1 rounded-lg border border-cream-200 bg-white px-3 py-1.5 text-xs font-medium text-sage-600 transition-colors hover:bg-cream-50 hover:text-sage-700"
+                        onClick={() => navigate('/appointments/' + a.id)}
+                        className="flex cursor-pointer items-center gap-1 rounded-lg border border-cream-200 bg-white px-3 py-1.5 text-xs font-medium text-sage-600 transition-colors hover:bg-cream-50 hover:text-sage-700"
                         title="查看详情"
                       >
                         <Eye size={14} /> 详情
@@ -689,6 +700,7 @@ function DayView({
   getGroomer,
   conflicts,
   compact,
+  navigate,
 }: {
   day: Date;
   getDayAppointments: (d: Date) => Appointment[];
@@ -698,6 +710,7 @@ function DayView({
   getGroomer: FinderFn<Groomer>;
   conflicts: string[];
   compact?: boolean;
+  navigate: (path: string) => void;
 }) {
   const apts = getDayAppointments(day).sort(
     (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
@@ -729,8 +742,9 @@ function DayView({
         return (
           <div
             key={a.id}
+            onClick={() => navigate('/appointments/' + a.id)}
             className={cn(
-              'flex flex-wrap items-center gap-4 rounded-xl2 border p-4 transition-all',
+              'flex cursor-pointer flex-wrap items-center gap-4 rounded-xl2 border p-4 transition-all',
               isConflict ? 'border-terracotta-200 bg-terracotta-50/50' : 'border-cream-200/70 bg-cream-50/40',
               'hover:border-sage-200 hover:bg-white hover:shadow-soft'
             )}

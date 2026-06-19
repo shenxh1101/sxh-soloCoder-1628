@@ -368,8 +368,9 @@ function MemberCard({
 export default function MemberList() {
   const members = useAppStore((s) => s.members);
   const pets = useAppStore((s) => s.pets);
+  const rechargeRules = useAppStore((s) => s.rechargeRules);
   const createMember = useAppStore((s) => s.createMember);
-  const initData = useAppStore((s) => s.initData);
+  const rechargeMember = useAppStore((s) => s.rechargeMember);
   const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
@@ -377,7 +378,7 @@ export default function MemberList() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [rechargeOpen, setRechargeOpen] = useState(false);
-  const [rechargeMember, setRechargeMember] = useState<Member | null>(null);
+  const [rechargeMemberData, setRechargeMemberData] = useState<Member | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const {
@@ -386,10 +387,6 @@ export default function MemberList() {
     reset,
     formState: { errors },
   } = useForm<NewMemberForm>();
-
-  useEffect(() => {
-    initData();
-  }, [initData]);
 
   const filteredMembers = useMemo(() => {
     return members.filter((m) => {
@@ -419,7 +416,7 @@ export default function MemberList() {
   };
 
   const openRecharge = (m: Member) => {
-    setRechargeMember(m);
+    setRechargeMemberData(m);
     setRechargeOpen(true);
   };
 
@@ -618,7 +615,7 @@ export default function MemberList() {
       </AnimatePresence>
 
       <RechargeModal
-        member={rechargeMember}
+        member={rechargeMemberData}
         open={rechargeOpen}
         onClose={() => setRechargeOpen(false)}
       />

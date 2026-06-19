@@ -110,16 +110,21 @@ function Avatar({ name, className }: { name: string; className?: string }) {
 export default function AppointmentDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const initData = useAppStore((s) => s.initData);
+  const appointments = useAppStore((s) => s.appointments);
+  const members = useAppStore((s) => s.members);
+  const pets = useAppStore((s) => s.pets);
+  const services = useAppStore((s) => s.services);
+  const groomers = useAppStore((s) => s.groomers);
+  const consumptionRecords = useAppStore((s) => s.consumptionRecords);
   const updateAppointment = useAppStore((s) => s.updateAppointment);
   const cancelAppointment = useAppStore((s) => s.cancelAppointment);
   const completeAppointment = useAppStore((s) => s.completeAppointment);
+  const initData = useAppStore((s) => s.initData);
+  const initialized = useAppStore((s) => s.initialized);
 
   useEffect(() => {
     initData();
   }, [initData]);
-
-  const { appointments, members, pets, services, groomers, consumptionRecords } = useAppStore.getState();
 
   const apt = useMemo(() => appointments.find((a) => a.id === id), [appointments, id]);
   const member = useMemo(() => members.find((m) => m.id === apt?.memberId), [members, apt]);
@@ -136,7 +141,21 @@ export default function AppointmentDetail() {
   const [completeMsg, setCompleteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [actionToast, setActionToast] = useState<string | null>(null);
 
-  if (!apt) {
+  const isLoading = !initialized || appointments.length === 0;
+  const aptNotFound = !apt && !isLoading;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-cream-50 p-8 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 mx-auto mb-4 border-4 border-sage-200 border-t-sage-500 rounded-full animate-spin" />
+          <p className="text-sage-500 text-sm font-medium">加载中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (aptNotFound) {
     return (
       <div className="min-h-screen bg-cream-50 p-8 flex items-center justify-center">
         <div className="text-center">
@@ -184,7 +203,8 @@ export default function AppointmentDetail() {
       setTimeout(() => {
         setShowComplete(false);
         setCompleteMsg(null);
-      }, 1200);
+        navigate(-1);
+      }, 1500);
     } else {
       setCompleteMsg({ type: 'error', text: res.error ?? '操作失败' });
     }
@@ -194,16 +214,31 @@ export default function AppointmentDetail() {
     ? Math.round((new Date(apt.endAt).getTime() - new Date(apt.startAt).getTime()) / 60000)
     : null;
 
+  const remindOffset = (() => {
+    try {
+      return localStorage.getItem('pet_remind_offset') || '2h';
+    } catch {
+      return '2h';
+    }
+  })();
+  const remindOffsetMap: Record<string, string> = {
+    '1h': '提前1小时',
+    '2h': '提前2小时',
+    '12h': '提前12小时',
+    '24h': '提前24小时',
+  };
+  const remindOffsetText = remindOffsetMap[remindOffset] || '提前2小时';
+
   return (
     <div className="min-h-screen bg-cream-50 p-4 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-6xl space-y-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <button
             onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-sm text-sage-500 hover:text-sage-700 font-medium transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-sage-200 text-sm text-sage-600 hover:bg-sage-50 hover:text-sage-700 hover:border-sage-300 font-medium transition-all shadow-sm"
           >
             <ChevronLeft className="w-4 h-4" />
-            返回
+            返回列表
           </button>
           <div className="text-xs text-sage-400 font-mono">ID: {apt.id}</div>
         </div>
@@ -440,6 +475,9 @@ export default function AppointmentDetail() {
                       {member?.phone
                         ? `已发送至 ${member.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')}`
                         : '无手机号'}
+                    </div>
+                    <div className="text-xs text-sage-400 mt-0.5">
+                      ⏰ {remindOffsetText}提醒
                     </div>
                   </div>
                 </div>
