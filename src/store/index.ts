@@ -265,7 +265,15 @@ export const useAppStore = create<AppState>()(
 
       cancelAppointment: (id) => {
         set((s) => ({
-          appointments: s.appointments.map((a) => (a.id === id ? { ...a, status: 'cancelled' as AppointmentStatus } : a)),
+          appointments: s.appointments.map((a) =>
+            a.id === id
+              ? {
+                  ...a,
+                  status: 'cancelled' as AppointmentStatus,
+                  smsStatus: a.smsStatus === 'pending' ? 'disabled' : a.smsStatus,
+                }
+              : a
+          ),
         }));
       },
 
@@ -328,7 +336,15 @@ export const useAppStore = create<AppState>()(
         };
 
         set((st) => ({
-          appointments: st.appointments.map((a) => (a.id === id ? { ...a, status: 'completed' as AppointmentStatus } : a)),
+          appointments: st.appointments.map((a) =>
+            a.id === id
+              ? {
+                  ...a,
+                  status: 'completed' as AppointmentStatus,
+                  smsStatus: a.smsStatus === 'pending' ? 'disabled' : a.smsStatus,
+                }
+              : a
+          ),
           members: st.members.map((m) =>
             m.id === apt.memberId ? { ...m, balance: newBalance, serviceCredits: newCredits, points: newPoints, level } : m
           ),
@@ -585,7 +601,20 @@ export const useAppStore = create<AppState>()(
         pointsRecords: state.pointsRecords,
         exchangeRecords: state.exchangeRecords,
         initialized: state.initialized,
+        smsEnabled: state.smsEnabled,
+        remindOffset: state.remindOffset,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.processPendingSms();
+          if (!_smsIntervalStarted) {
+            _smsIntervalStarted = true;
+            setInterval(() => {
+              state.processPendingSms();
+            }, 60 * 1000);
+          }
+        }
+      },
     }
   )
 );

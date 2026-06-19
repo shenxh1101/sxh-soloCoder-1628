@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation } from "react-router-dom";
+import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Home,
@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
+import { useAppStore } from "@/store";
+import { cn } from "@/lib/utils";
 
 const menuItems = [
   { path: "/", label: "仪表盘", icon: Home, breadcrumb: "仪表盘" },
@@ -44,8 +46,10 @@ function getBreadcrumb(pathname: string): { label: string; subLabel?: string } {
 
 export default function Layout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const breadcrumb = getBreadcrumb(location.pathname);
   const today = format(new Date(), "yyyy年MM月dd日 EEEE", { locale: zhCN });
+  const smsEnabled = useAppStore((s) => s.smsEnabled);
 
   return (
     <div className="flex min-h-screen bg-cream-100">
@@ -89,16 +93,29 @@ export default function Layout() {
 
       <main className="ml-[240px] flex-1 flex flex-col min-h-screen">
         <div className="px-8 pt-6 pb-4 border-b border-cream-200 bg-cream-100/80 backdrop-blur-sm sticky top-0 z-5">
-          <div className="flex items-center gap-2 text-sm text-sage-500">
-            <Home size={14} strokeWidth={2} />
-            <ChevronRight size={14} strokeWidth={2} />
-            <span className="text-sage-700 font-medium">{breadcrumb.label}</span>
-            {breadcrumb.subLabel && (
-              <>
-                <ChevronRight size={14} strokeWidth={2} />
-                <span className="text-sage-600">{breadcrumb.subLabel}</span>
-              </>
-            )}
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm text-sage-500">
+              <Home size={14} strokeWidth={2} />
+              <ChevronRight size={14} strokeWidth={2} />
+              <span className="text-sage-700 font-medium">{breadcrumb.label}</span>
+              {breadcrumb.subLabel && (
+                <>
+                  <ChevronRight size={14} strokeWidth={2} />
+                  <span className="text-sage-600">{breadcrumb.subLabel}</span>
+                </>
+              )}
+            </div>
+            <button
+              onClick={() => navigate("/settings")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200",
+                smsEnabled
+                  ? "bg-sage-500 text-sage-50 hover:bg-sage-600"
+                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+              )}
+            >
+              {smsEnabled ? "🔔 提醒开" : "🔕 提醒关"}
+            </button>
           </div>
         </div>
 

@@ -104,11 +104,11 @@ export const initMembers = (): Member[] => [
 ];
 
 export const initPets = (): Pet[] => [
-  { id: 'p1', memberId: 'm1', name: '豆豆', breed: '泰迪', gender: '公', weight: 5.2, birthday: '2022-03-15', notes: '耳朵敏感，洗澡时请注意' },
-  { id: 'p2', memberId: 'm2', name: '大黄', breed: '金毛', gender: '公', weight: 28, birthday: '2020-08-20', notes: '体型大，需要美容师阿杰' },
-  { id: 'p3', memberId: 'm3', name: '棉花糖', breed: '比熊', gender: '母', weight: 4.5, birthday: '2021-12-01', notes: '爱美，喜欢扎小辫子' },
-  { id: 'p4', memberId: 'm3', name: '奶糖', breed: '柯基', gender: '母', weight: 11, birthday: '2023-05-10' },
-  { id: 'p5', memberId: 'm4', name: '黑妞', breed: '中华田园犬', gender: '母', weight: 8, birthday: '2023-01-01' },
+  { id: 'p1', memberId: 'm1', name: '豆豆', breed: '泰迪', gender: '公', weight: 5.2, birthday: '2022-03-15', notes: '耳朵敏感，洗澡时请注意', careNotes: '每2周洗一次澡，耳朵容易发炎需特别注意清洁', preferences: ['怕吹风', '耳朵敏感', '泰迪圆头造型'] },
+  { id: 'p2', memberId: 'm2', name: '大黄', breed: '金毛', gender: '公', weight: 28, birthday: '2020-08-20', notes: '体型大，需要美容师阿杰', careNotes: '体型较大，洗澡需2人配合，爪子有过炎症', preferences: ['怕吹风机声音', '用低敏沐浴露', '爪子需特别护理'] },
+  { id: 'p3', memberId: 'm3', name: '棉花糖', breed: '比熊', gender: '母', weight: 4.5, birthday: '2021-12-01', notes: '爱美，喜欢扎小辫子', careNotes: '毛发易打结，每次需先梳理，泪痕较重', preferences: ['喜欢扎小辫子', '需每日梳毛', '无泪配方'] },
+  { id: 'p4', memberId: 'm3', name: '奶糖', breed: '柯基', gender: '母', weight: 11, birthday: '2023-05-10', careNotes: '肠胃敏感，洗完当天不要喂新食物', preferences: ['爱咬人', '需防滑垫'] },
+  { id: 'p5', memberId: 'm4', name: '黑妞', breed: '中华田园犬', gender: '母', weight: 8, birthday: '2023-01-01', careNotes: '比较胆小，慢慢来', preferences: ['怕陌生人', '第一次洗澡'] },
 ];
 
 const baseDate = startOfDay(new Date());

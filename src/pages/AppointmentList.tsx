@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -20,6 +20,13 @@ import {
   CreditCard as CreditCardIcon,
   AlertCircle,
   Filter,
+  Pencil,
+  Scissors,
+  User,
+  Clock,
+  CalendarDays as CalendarDaysIcon,
+  Star,
+  ArrowRight,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
@@ -40,6 +47,8 @@ import {
   endOfDay,
   subDays,
   differenceInMinutes,
+  addMinutes,
+  parseISO,
 } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import type { Appointment, AppointmentStatus, PayType, Pet, Member, Service, Groomer } from '@/types';
@@ -61,17 +70,628 @@ const statusFilters: { key: AppointmentStatus | 'all'; label: string }[] = [
   { key: 'cancelled', label: '已取消' },
 ];
 
-const payOptions: { key: PayType; label: string; icon: typeof Wallet; color: string }[] = [
-  { key: 'balance', label: '余额支付', icon: Wallet, color: 'bg-sage-500 hover:bg-sage-600' },
-  { key: 'credit', label: '次卡抵扣', icon: Ticket, color: 'bg-sky2-400 hover:bg-sky2-300' },
-  { key: 'cash', label: '现金支付', icon: Banknote, color: 'bg-terracotta-400 hover:bg-terracotta-500' },
-  { key: 'wechat', label: '微信支付', icon: MessageCircle, color: 'bg-green-500 hover:bg-green-600' },
-  { key: 'alipay', label: '支付宝', icon: CreditCardIcon, color: 'bg-blue-500 hover:bg-blue-600' },
+const payOptions: { key: PayType; label: string; icon: typeof Wallet; color: string; desc: string }[] = [
+  { key: 'balance', label: '余额', icon: Wallet, color: 'bg-sage-500 hover:bg-sage-600', desc: '直接从会员余额扣除' },
+  { key: 'credit', label: '次卡', icon: Ticket, color: 'bg-sky2-400 hover:bg-sky2-300', desc: '使用剩余服务次数' },
+  { key: 'cash', label: '现金', icon: Banknote, color: 'bg-terracotta-400 hover:bg-terracotta-500', desc: '线下现金收款' },
+  { key: 'wechat', label: '微信', icon: MessageCircle, color: 'bg-green-500 hover:bg-green-600', desc: '扫码支付' },
+  { key: 'alipay', label: '支付宝', icon: CreditCardIcon, color: 'bg-blue-500 hover:bg-blue-600', desc: '扫码支付' },
 ];
 
 type ViewMode = 'month' | 'week' | 'day';
 
 type FinderFn<T> = (id: string) => T | undefined;
+
+function getAvatar(name: string) {
+  const colors = [
+    'bg-petal-200 text-petal-600',
+    'bg-sage-200 text-sage-700',
+    'bg-terracotta-200 text-terracotta-600',
+    'bg-sky2-200 text-sky2-600',
+    'bg-cream-300 text-sage-700',
+  ];
+  const idx = name.charCodeAt(0) % colors.length;
+  return colors[idx];
+}
+
+function Avatar({ name, className }: { name: string; className?: string }) {
+  const color = getAvatar(name);
+  const initial = name.charAt(0);
+  return (
+    <div className={cn('flex items-center justify-center rounded-full font-medium shrink-0', color, className)}>
+      {initial}
+    </div>
+  );
+}
+
+interface AppointmentEditModalProps {
+  open: boolean;
+  appointment: Appointment | null;
+  services: Service[];
+  groomers: Groomer[];
+  members: Member[];
+  pets: Pet[];
+  onClose: () => void;
+  onSave: (id: string, data: Partial<Appointment>) => Promise<boolean>;
+}
+
+function AppointmentEditModal({
+  open,
+  appointment,
+  services,
+  groomers,
+  members,
+  pets,
+  onClose,
+  onSave,
+}: AppointmentEditModalProps) {
+  const activeServices = services.filter((s) => s.isActive);
+  const activeGroomers = groomers.filter((g) => g.isActive);
+
+  const [serviceId, setServiceId] = useState('');
+  const [groomerId, setGroomerId] = useState('');
+  const [dateStr, setDateStr] = useState('');
+  const [timeStr, setTimeStr] = useState('');
+  const [conflictError, setConflictError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open && appointment) {
+      setServiceId(appointment.serviceId);
+      setGroomerId(appointment.groomerId);
+      setDateStr(format(parseISO(appointment.startAt), 'yyyy-MM-dd'));
+      setTimeStr(format(parseISO(appointment.startAt), 'HH:mm'));
+      setConflictError(null);
+      setSaving(false);
+    }
+  }, [open, appointment]);
+
+  const currentService = services.find((s) => s.id === appointment?.serviceId);
+  const selectedService = services.find((s) => s.id === serviceId);
+  const duration = selectedService?.duration ?? currentService?.duration ?? 60;
+
+  const member = appointment ? members.find((m) => m.id === appointment.memberId) : undefined;
+  const pet = appointment ? pets.find((p) => p.id === appointment.petId) : undefined;
+
+  const computeEndAt = () => {
+    const start = new Date(`${dateStr}T${timeStr}`);
+    return addMinutes(start, duration);
+  };
+
+  const timeOptions: string[] = [];
+  for (let h = 9; h <= 20; h++) {
+    timeOptions.push(`${String(h).padStart(2, '0')}:00`);
+    if (h < 20) timeOptions.push(`${String(h).padStart(2, '0')}:30`);
+  }
+
+  const handleSave = async () => {
+    if (!appointment) return;
+    setConflictError(null);
+    setSaving(true);
+    const startAt = new Date(`${dateStr}T${timeStr}`);
+    const endAt = computeEndAt();
+    if (isNaN(startAt.getTime())) {
+      setConflictError('请选择有效的日期和时间');
+      setSaving(false);
+      return;
+    }
+    const success = await onSave(appointment.id, {
+      serviceId,
+      groomerId,
+      startAt: startAt.toISOString(),
+      endAt: endAt.toISOString(),
+    });
+    if (!success) {
+      const conflict = useAppStore.getState().checkConflict(groomerId, startAt, endAt, appointment.id);
+      if (conflict) {
+        setConflictError(
+          `⏰ 时间冲突：该美容师在${format(new Date(conflict.startAt), 'HH:mm')}-${format(new Date(conflict.endAt), 'HH:mm')}已有预约，请调整`
+        );
+      } else {
+        setConflictError('保存失败，请稍后重试');
+      }
+      setSaving(false);
+    }
+  };
+
+  if (!open || !appointment) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-sage-700/30 backdrop-blur-sm p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 8 }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-full max-w-2xl rounded-2xl2 bg-white p-6 shadow-card-hover max-h-[90vh] overflow-y-auto"
+        >
+          <div className="mb-5 flex items-start justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-sage-700 flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-sky2-500" />
+                编辑预约 #{appointment.id.slice(-6)}
+              </h3>
+              <p className="mt-1 text-xs text-sage-400">修改预约信息，保存前自动检测冲突</p>
+            </div>
+            <button
+              onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-sage-400 transition-colors hover:bg-cream-100 hover:text-sage-600"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {conflictError && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-5 rounded-xl bg-petal-50 border border-petal-200 p-3 flex items-start gap-2"
+            >
+              <AlertCircle className="w-4 h-4 text-petal-500 shrink-0 mt-0.5" />
+              <span className="text-sm text-petal-600 font-medium">{conflictError}</span>
+            </motion.div>
+          )}
+
+          <div className="space-y-5">
+            <div className="rounded-xl bg-cream-50 p-4 border border-cream-200">
+              <div className="text-xs font-medium text-sage-500 mb-2">客户信息（不可修改）</div>
+              <div className="flex items-center gap-3">
+                <Avatar name={member?.name ?? '?'} className="w-10 h-10" />
+                <div>
+                  <div className="text-sm font-semibold text-sage-700">
+                    👤 {member?.name ?? '未知客户'} · 🐾 {pet?.name ?? '未知宠物'}
+                  </div>
+                  <div className="text-xs text-sage-400">
+                    {pet?.breed ?? ''} {member?.phone ?? ''}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-sage-700 mb-2">
+                <Scissors className="w-4 h-4 inline mr-1.5 -mt-0.5 text-sage-500" />
+                服务项目
+              </label>
+              <select
+                value={serviceId}
+                onChange={(e) => setServiceId(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-sage-200 bg-white text-sage-700 text-sm focus:outline-none focus:ring-2 focus:ring-sage-300 focus:border-sage-300 transition-all"
+              >
+                {activeServices.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} - ¥{s.price}（{s.duration}分钟）
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-sage-700 mb-2">
+                <User className="w-4 h-4 inline mr-1.5 -mt-0.5 text-sage-500" />
+                美容师
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {activeGroomers.map((g) => {
+                  const selected = groomerId === g.id;
+                  return (
+                    <button
+                      key={g.id}
+                      onClick={() => setGroomerId(g.id)}
+                      className={cn(
+                        'flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all',
+                        selected
+                          ? 'border-sky2-400 bg-sky2-50 shadow-soft'
+                          : 'border-sage-100 bg-white hover:border-sage-200 hover:bg-cream-50',
+                      )}
+                    >
+                      <Avatar name={g.name} className="w-10 h-10" />
+                      <div className="flex-1 min-w-0">
+                        <div className={cn(
+                          'text-sm font-semibold truncate',
+                          selected ? 'text-sky2-600' : 'text-sage-700',
+                        )}>
+                          {g.name}
+                        </div>
+                        <div className="text-xs text-sage-400 truncate">{g.phone}</div>
+                      </div>
+                      {selected && <CheckCircle2 className="w-4 h-4 text-sky2-400 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-sage-700 mb-2">
+                  <CalendarDaysIcon className="w-4 h-4 inline mr-1.5 -mt-0.5 text-sage-500" />
+                  日期
+                </label>
+                <input
+                  type="date"
+                  value={dateStr}
+                  onChange={(e) => setDateStr(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-sage-200 bg-white text-sage-700 text-sm focus:outline-none focus:ring-2 focus:ring-sage-300 focus:border-sage-300 transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-sage-700 mb-2">
+                  <Clock className="w-4 h-4 inline mr-1.5 -mt-0.5 text-sage-500" />
+                  开始时间
+                </label>
+                <select
+                  value={timeStr}
+                  onChange={(e) => setTimeStr(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-sage-200 bg-white text-sage-700 text-sm focus:outline-none focus:ring-2 focus:ring-sage-300 focus:border-sage-300 transition-all"
+                >
+                  {timeOptions.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-cream-50 p-4 border border-cream-200">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-sage-500">服务时长</span>
+                <span className="font-medium text-sage-700">{duration} 分钟</span>
+              </div>
+              <div className="flex items-center justify-between text-sm mt-2">
+                <span className="text-sage-500">预计结束（自动计算）</span>
+                <span className="font-semibold text-terracotta-500">
+                  {format(computeEndAt(), 'yyyy-MM-dd HH:mm')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-white border border-sage-200 text-sm font-medium text-sage-600 hover:bg-sage-50 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className={cn(
+                'flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-semibold shadow-soft transition-colors',
+                saving ? 'bg-sky2-300 cursor-not-allowed' : 'bg-sky2-500 hover:bg-sky2-600'
+              )}
+            >
+              {saving ? '保存中...' : '保存修改'}
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+interface CompletePaymentModalProps {
+  open: boolean;
+  onClose: () => void;
+  appointment: Appointment | null;
+  members: Member[];
+  services: Service[];
+  pets: Pet[];
+  completeAppointment: (id: string, payType: PayType) => { success: boolean; error?: string };
+  showToast: (text: string) => void;
+}
+
+function CompletePaymentModal({
+  open,
+  onClose,
+  appointment,
+  members,
+  services,
+  pets,
+  completeAppointment,
+  showToast,
+}: CompletePaymentModalProps) {
+  const [selectedPayType, setSelectedPayType] = useState<PayType | null>(null);
+  const [completeMsg, setCompleteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setSelectedPayType(null);
+      setCompleteMsg(null);
+    }
+  }, [open]);
+
+  const member = appointment ? members.find((m) => m.id === appointment.memberId) : undefined;
+  const service = appointment ? services.find((s) => s.id === appointment.serviceId) : undefined;
+  const pet = appointment ? pets.find((p) => p.id === appointment.petId) : undefined;
+
+  const creditCount = member && service
+    ? member.serviceCredits.find((c) => c.serviceId === service.id)?.count ?? 0
+    : 0;
+  const balanceDisabled = (member?.balance ?? 0) < (service?.price ?? 0);
+  const creditDisabled = creditCount <= 0;
+
+  const payTypeLabel: Record<PayType, string> = {
+    balance: '余额',
+    credit: '次卡',
+    cash: '现金',
+    wechat: '微信',
+    alipay: '支付宝',
+  };
+
+  const newBalance = selectedPayType === 'balance' && service
+    ? (member?.balance ?? 0) - service.price
+    : member?.balance ?? 0;
+  const newCredits = selectedPayType === 'credit' ? creditCount - 1 : creditCount;
+
+  const handleConfirm = () => {
+    if (!selectedPayType || !appointment || !service || !member) return;
+    const res = completeAppointment(appointment.id, selectedPayType);
+    if (res.success) {
+      setCompleteMsg({ type: 'success', text: '服务完成，消费记录已生成 🎉' });
+      showToast('预约更新成功');
+      setTimeout(() => {
+        onClose();
+      }, 1200);
+    } else {
+      setCompleteMsg({ type: 'error', text: res.error ?? '操作失败' });
+      setTimeout(() => setCompleteMsg(null), 2000);
+    }
+  };
+
+  if (!open || !appointment || !service || !member) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-sage-700/30 backdrop-blur-sm p-4"
+        onClick={() => !completeMsg && onClose()}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 8 }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-full max-w-4xl rounded-2xl2 bg-white p-6 shadow-card-hover max-h-[90vh] overflow-y-auto"
+        >
+          {completeMsg ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className={cn(
+                'flex h-16 w-16 items-center justify-center rounded-full',
+                completeMsg.type === 'success' ? 'bg-sage-100' : 'bg-petal-100',
+              )}>
+                {completeMsg.type === 'success' ? (
+                  <CheckCircle2 size={32} className="text-sage-500" />
+                ) : (
+                  <XCircle size={32} className="text-petal-400" />
+                )}
+              </div>
+              <p className="mt-4 text-lg font-semibold text-sage-700">{completeMsg.text}</p>
+            </div>
+          ) : (
+            <>
+              <div className="mb-5 flex items-start justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-sage-700 flex items-center gap-2">
+                    <Banknote className="w-4 h-4 text-terracotta-400" />
+                    完成服务 - 收银结算
+                  </h3>
+                  <p className="mt-1 text-xs text-sage-400">请选择支付方式并确认结算明细</p>
+                </div>
+                <button
+                  onClick={onClose}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-sage-400 transition-colors hover:bg-cream-100 hover:text-sage-600"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+                <div className="lg:col-span-2 space-y-4">
+                  <h4 className="text-sm font-semibold text-sage-600 flex items-center gap-2">
+                    <Wallet className="w-4 h-4" />
+                    支付方式
+                  </h4>
+                  <div className="space-y-2.5">
+                    {payOptions.map((opt) => {
+                      const isSelected = selectedPayType === opt.key;
+                      const isDisabled =
+                        (opt.key === 'balance' && balanceDisabled) ||
+                        (opt.key === 'credit' && creditDisabled);
+                      return (
+                        <button
+                          key={opt.key}
+                          onClick={() => !isDisabled && setSelectedPayType(opt.key)}
+                          disabled={isDisabled}
+                          className={cn(
+                            'w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-all duration-200 border-2',
+                            isDisabled
+                              ? 'bg-gray-50 border-gray-100 opacity-50 cursor-not-allowed'
+                              : isSelected
+                                ? cn('border-transparent text-white shadow-soft', opt.color)
+                                : 'border-sage-100 bg-white hover:border-sage-200 hover:bg-cream-50',
+                          )}
+                        >
+                          <div className={cn(
+                            'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg',
+                            isSelected ? 'bg-white/25' : isDisabled ? 'bg-gray-100' : 'bg-cream-100',
+                          )}>
+                            <opt.icon
+                              size={22}
+                              style={{ color: isSelected ? 'white' : isDisabled ? '#9ca3af' : '#16a34a' }}
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className={cn(
+                              'text-sm font-semibold',
+                              isSelected ? 'text-white' : 'text-sage-700',
+                            )}>
+                              {opt.label}
+                              {opt.key === 'balance' && balanceDisabled && (
+                                <span className="ml-2 text-xs font-normal opacity-75">（余额不足）</span>
+                              )}
+                              {opt.key === 'credit' && creditDisabled && (
+                                <span className="ml-2 text-xs font-normal opacity-75">（无可用次数）</span>
+                              )}
+                            </div>
+                            <div className={cn(
+                              'text-xs opacity-80',
+                              isSelected ? 'text-white/80' : 'text-sage-400',
+                            )}>
+                              {opt.desc}
+                            </div>
+                          </div>
+                          {isSelected && <CheckCircle2 className="w-5 h-5 text-white shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-3">
+                  <h4 className="text-sm font-semibold text-sage-600 flex items-center gap-2 mb-4">
+                    <Star className="w-4 h-4" />
+                    结算明细
+                  </h4>
+                  {selectedPayType ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="rounded-2xl2 bg-gradient-to-br from-cream-50 to-sage-50 border border-sage-100 p-5 shadow-soft"
+                    >
+                      <div className="flex items-center gap-3 pb-4 border-b border-sage-100/80">
+                        <div className="w-12 h-12 rounded-xl bg-terracotta-100 flex items-center justify-center">
+                          <Scissors className="w-6 h-6 text-terracotta-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sage-800">{service.name}</div>
+                          <div className="text-xs text-sage-400">
+                            {member.name} - {pet?.name ?? '未知宠物'}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs text-sage-400">服务金额</div>
+                          <div className="text-2xl font-bold text-terracotta-500">¥{service.price}</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 pt-4">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-sage-500">支付方式</span>
+                          <span className="font-medium text-sage-700">
+                            {payTypeLabel[selectedPayType]}支付
+                          </span>
+                        </div>
+
+                        {selectedPayType === 'balance' && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-sage-500">扣减余额</span>
+                            <span className="font-semibold text-petal-500">- ¥{service.price}</span>
+                          </div>
+                        )}
+
+                        {selectedPayType === 'credit' && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-sage-500">扣减次数</span>
+                            <span className="font-semibold text-sky2-600">
+                              {service.name} x 1（剩{newCredits}次）
+                            </span>
+                          </div>
+                        )}
+
+                        {(selectedPayType === 'cash' || selectedPayType === 'wechat' || selectedPayType === 'alipay') && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-sage-500">支付差额</span>
+                            <span className="font-semibold text-terracotta-500">
+                              {payTypeLabel[selectedPayType]} ¥{service.price}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-sm pt-2 border-t border-sage-100/60">
+                          <span className="text-sage-500 flex items-center gap-1.5">
+                            <Star className="w-3.5 h-3.5 text-terracotta-400" />
+                            本次获得积分
+                          </span>
+                          <span className="font-bold text-terracotta-500">+ {service.price} 分</span>
+                        </div>
+
+                        <div className="rounded-xl bg-white/80 p-3.5 mt-2 border border-sage-100/80">
+                          <div className="text-xs font-medium text-sage-500 mb-2">会员余额变动</div>
+                          <div className="flex items-center justify-center gap-4">
+                            <div className="text-center">
+                              <div className="text-[11px] text-sage-400 mb-0.5">扣款前</div>
+                              <div className={cn(
+                                'text-lg font-bold',
+                                selectedPayType === 'balance' ? 'text-sage-600' : 'text-sage-700',
+                              )}>
+                                ¥{member.balance}
+                              </div>
+                              {selectedPayType === 'credit' && (
+                                <div className="text-[11px] text-sky2-500 mt-0.5">次卡 {creditCount} 次</div>
+                              )}
+                            </div>
+                            <ArrowRight className={cn(
+                              'w-5 h-5',
+                              selectedPayType === 'balance' ? 'text-petal-400' : 'text-sage-300',
+                            )} />
+                            <div className="text-center">
+                              <div className="text-[11px] text-sage-400 mb-0.5">扣款后</div>
+                              <div className={cn(
+                                'text-lg font-bold',
+                                selectedPayType === 'balance' ? 'text-petal-500' : 'text-sage-700',
+                              )}>
+                                ¥{newBalance}
+                              </div>
+                              {selectedPayType === 'credit' && (
+                                <div className="text-[11px] text-sky2-600 mt-0.5">次卡 {newCredits} 次</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <div className="rounded-2xl2 border-2 border-dashed border-sage-200 p-10 text-center">
+                      <Wallet className="w-10 h-10 mx-auto text-sage-300 mb-3" />
+                      <p className="text-sm text-sage-400 font-medium">请在左侧选择支付方式</p>
+                      <p className="text-xs text-sage-300 mt-1">选择后将在此显示完整结算明细</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleConfirm}
+                    disabled={!selectedPayType}
+                    className={cn(
+                      'mt-5 w-full py-3.5 rounded-xl text-sm font-semibold transition-all shadow-soft',
+                      selectedPayType
+                        ? 'bg-sage-500 hover:bg-sage-600 text-white hover:-translate-y-0.5'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed',
+                    )}
+                  >
+                    {selectedPayType
+                      ? `确认支付 ¥${service.price}（${payTypeLabel[selectedPayType]}）`
+                      : '请选择支付方式'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
 
 export default function AppointmentList() {
   const navigate = useNavigate();
@@ -82,6 +702,8 @@ export default function AppointmentList() {
   const groomers = useAppStore((s) => s.groomers);
   const cancelAppointment = useAppStore((s) => s.cancelAppointment);
   const completeAppointment = useAppStore((s) => s.completeAppointment);
+  const updateAppointment = useAppStore((s) => s.updateAppointment);
+  const checkConflict = useAppStore((s) => s.checkConflict);
 
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [cursor, setCursor] = useState(new Date());
@@ -91,7 +713,8 @@ export default function AppointmentList() {
   const [hoverDay, setHoverDay] = useState<Date | null>(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [completeModal, setCompleteModal] = useState<Appointment | null>(null);
-  const [completeMsg, setCompleteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [editModal, setEditModal] = useState<Appointment | null>(null);
+  const [actionToast, setActionToast] = useState<string | null>(null);
 
   const getPet: FinderFn<Pet> = (id) => pets.find((p) => p.id === id);
   const getMember: FinderFn<Member> = (id) => members.find((m) => m.id === id);
@@ -169,7 +792,6 @@ export default function AppointmentList() {
       });
     }
     return list.sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointments, statusFilter, search]);
 
   const goPrev = () => {
@@ -193,18 +815,23 @@ export default function AppointmentList() {
     return format(cursor, 'yyyy年 M月d日 EEEE', { locale: zhCN });
   }, [viewMode, cursor]);
 
-  const handleComplete = (payType: PayType) => {
-    if (!completeModal) return;
-    const res = completeAppointment(completeModal.id, payType);
-    if (res.success) {
-      setCompleteMsg({ type: 'success', text: '服务已完成，消费记录已生成 🎉' });
-      setTimeout(() => {
-        setCompleteModal(null);
-        setCompleteMsg(null);
-      }, 1200);
-    } else {
-      setCompleteMsg({ type: 'error', text: res.error ?? '操作失败' });
+  const showToast = (text: string) => {
+    setActionToast(text);
+    setTimeout(() => setActionToast(null), 2000);
+  };
+
+  const handleEditSave = async (id: string, data: Partial<Appointment>) => {
+    const startAt = new Date(data.startAt!);
+    const endAt = new Date(data.endAt!);
+    const groomerId = data.groomerId!;
+    const conflict = checkConflict(groomerId, startAt, endAt, id);
+    if (conflict) {
+      return false;
     }
+    updateAppointment(id, data);
+    showToast('预约更新成功');
+    setEditModal(null);
+    return true;
   };
 
   const weekDays = ['一', '二', '三', '四', '五', '六', '日'];
@@ -326,6 +953,7 @@ export default function AppointmentList() {
               getGroomer={getGroomer}
               conflicts={conflicts}
               navigate={navigate}
+              onEdit={(a) => setEditModal(a)}
             />
           ) : (
             <>
@@ -440,6 +1068,7 @@ export default function AppointmentList() {
                   conflicts={conflicts}
                   compact
                   navigate={navigate}
+                  onEdit={(a) => setEditModal(a)}
                 />
               </motion.div>
             )}
@@ -467,6 +1096,7 @@ export default function AppointmentList() {
                 const grm = getGroomer(a.groomerId);
                 const cfg = statusConfig[a.status];
                 const isConflict = conflicts.includes(a.id);
+                const canEdit = a.status !== 'completed' && a.status !== 'cancelled';
                 return (
                   <motion.div
                     key={a.id}
@@ -504,11 +1134,19 @@ export default function AppointmentList() {
                       >
                         <Eye size={14} /> 详情
                       </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => setEditModal(a)}
+                          className="flex items-center gap-1 rounded-full bg-sky2-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-sky2-600 shadow-soft"
+                          title="编辑预约"
+                        >
+                          <Pencil size={13} /> 编辑
+                        </button>
+                      )}
                       {(a.status === 'confirmed' || a.status === 'in_service') && (
                         <button
                           onClick={() => {
                             setCompleteModal(a);
-                            setCompleteMsg(null);
                           }}
                           className="flex items-center gap-1 rounded-lg bg-sage-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-sage-600"
                           title="完成服务"
@@ -582,108 +1220,40 @@ export default function AppointmentList() {
 
       <AnimatePresence>
         {completeModal && (
+          <CompletePaymentModal
+            open={!!completeModal}
+            appointment={completeModal}
+            members={members}
+            services={services}
+            pets={pets}
+            onClose={() => setCompleteModal(null)}
+            completeAppointment={completeAppointment}
+            showToast={showToast}
+          />
+        )}
+      </AnimatePresence>
+
+      <AppointmentEditModal
+        open={!!editModal}
+        appointment={editModal}
+        services={services}
+        groomers={groomers}
+        members={members}
+        pets={pets}
+        onClose={() => setEditModal(null)}
+        onSave={handleEditSave}
+      />
+
+      <AnimatePresence>
+        {actionToast && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-sage-700/30 backdrop-blur-sm p-4"
-            onClick={() => !completeMsg && setCompleteModal(null)}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] px-5 py-2.5 rounded-xl2 bg-sage-600 text-white text-sm font-medium shadow-card-hover flex items-center gap-2"
           >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 8 }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md rounded-2xl2 bg-white p-6 shadow-card-hover"
-            >
-              {completeMsg ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <div
-                    className={cn(
-                      'flex h-14 w-14 items-center justify-center rounded-full',
-                      completeMsg.type === 'success' ? 'bg-sage-100' : 'bg-petal-100'
-                    )}
-                  >
-                    {completeMsg.type === 'success' ? (
-                      <CheckCircle2 size={28} className="text-sage-500" />
-                    ) : (
-                      <XCircle size={28} className="text-petal-400" />
-                    )}
-                  </div>
-                  <p className="mt-4 text-base font-semibold text-sage-700">{completeMsg.text}</p>
-                </div>
-              ) : (
-                <>
-                  <div className="mb-4 flex items-start justify-between">
-                    <div>
-                      <h3 className="text-lg font-semibold text-sage-700">完成服务</h3>
-                      <p className="mt-1 text-xs text-sage-400">请选择本次服务的支付方式</p>
-                    </div>
-                    <button
-                      onClick={() => setCompleteModal(null)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-sage-400 transition-colors hover:bg-cream-100 hover:text-sage-600"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-
-                  <div className="mb-5 rounded-xl2 bg-cream-50 p-4">
-                    {(() => {
-                      const pet = getPet(completeModal.petId);
-                      const svc = getService(completeModal.serviceId);
-                      const member = getMember(completeModal.memberId);
-                      const creditCount =
-                        member?.serviceCredits.find((c) => c.serviceId === svc?.id)?.count ?? 0;
-                      return (
-                        <div className="space-y-1.5 text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sage-500">宠物</span>
-                            <span className="font-medium text-sage-700">🐾 {pet?.name}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sage-500">服务项目</span>
-                            <span className="font-medium text-sage-700">{svc?.name}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sage-500">服务金额</span>
-                            <span className="font-bold text-terracotta-500">¥{svc?.price}</span>
-                          </div>
-                          <div className="mt-2 border-t border-cream-200 pt-2">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-sage-400">会员余额</span>
-                              <span className="font-semibold text-sage-600">¥{member?.balance ?? 0}</span>
-                            </div>
-                            <div className="mt-1 flex items-center justify-between text-xs">
-                              <span className="text-sage-400">剩余次卡次数</span>
-                              <span className="font-semibold text-sage-600">{creditCount} 次</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {payOptions.map((opt) => (
-                      <button
-                        key={opt.key}
-                        onClick={() => handleComplete(opt.key)}
-                        className={cn(
-                          'flex items-center gap-3 rounded-xl2 px-4 py-3 text-left text-white shadow-soft transition-all duration-200',
-                          'hover:-translate-y-0.5 hover:shadow-card-hover active:translate-y-0',
-                          opt.color
-                        )}
-                      >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/20">
-                          <opt.icon size={18} />
-                        </div>
-                        <span className="text-sm font-semibold">{opt.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </motion.div>
+            <CheckCircle2 size={16} />
+            {actionToast}
           </motion.div>
         )}
       </AnimatePresence>
@@ -701,6 +1271,7 @@ function DayView({
   conflicts,
   compact,
   navigate,
+  onEdit,
 }: {
   day: Date;
   getDayAppointments: (d: Date) => Appointment[];
@@ -711,6 +1282,7 @@ function DayView({
   conflicts: string[];
   compact?: boolean;
   navigate: (path: string) => void;
+  onEdit: (a: Appointment) => void;
 }) {
   const apts = getDayAppointments(day).sort(
     (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
@@ -739,16 +1311,29 @@ function DayView({
         const svc = getService(a.serviceId);
         const grm = getGroomer(a.groomerId);
         const isConflict = conflicts.includes(a.id);
+        const canEdit = a.status !== 'completed' && a.status !== 'cancelled';
         return (
           <div
             key={a.id}
             onClick={() => navigate('/appointments/' + a.id)}
             className={cn(
-              'flex cursor-pointer flex-wrap items-center gap-4 rounded-xl2 border p-4 transition-all',
+              'relative flex cursor-pointer flex-wrap items-center gap-4 rounded-xl2 border p-4 transition-all',
               isConflict ? 'border-terracotta-200 bg-terracotta-50/50' : 'border-cream-200/70 bg-cream-50/40',
               'hover:border-sage-200 hover:bg-white hover:shadow-soft'
             )}
           >
+            {canEdit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(a);
+                }}
+                className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg bg-sky2-500 text-white shadow-soft transition-all hover:bg-sky2-600 hover:scale-105 z-10"
+                title="编辑预约"
+              >
+                <Pencil size={13} />
+              </button>
+            )}
             <div className="flex items-center gap-3">
               <div className={cn('h-10 w-1.5 rounded-full', cfg.bg)} />
               <div>

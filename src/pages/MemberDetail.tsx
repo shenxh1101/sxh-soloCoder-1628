@@ -20,6 +20,8 @@ import {
   Minus,
   ChevronDown,
   ArrowLeft,
+  Save,
+  Tag,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { useAppStore } from '@/store';
@@ -320,6 +322,7 @@ export default function MemberDetail() {
   const updateMember = useAppStore((s) => s.updateMember);
   const rechargeMember = useAppStore((s) => s.rechargeMember);
   const createPet = useAppStore((s) => s.createPet);
+  const updatePet = useAppStore((s) => s.updatePet);
   const initData = useAppStore((s) => s.initData);
 
   const [activeTab, setActiveTab] = useState<TabKey>('pets');
@@ -327,6 +330,11 @@ export default function MemberDetail() {
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [editingCareNotesPetId, setEditingCareNotesPetId] = useState<string | null>(null);
+  const [careNotesDraft, setCareNotesDraft] = useState('');
+  const [editPrefsOpen, setEditPrefsOpen] = useState(false);
+  const [editingPrefsPetId, setEditingPrefsPetId] = useState<string | null>(null);
+  const [prefsDraft, setPrefsDraft] = useState('');
 
   const member = useMemo(() => members.find((m) => m.id === id) || null, [members, id]);
 
@@ -387,6 +395,42 @@ export default function MemberDetail() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2000);
+  };
+
+  const startEditCareNotes = (petId: string, currentNotes?: string) => {
+    setEditingCareNotesPetId(petId);
+    setCareNotesDraft(currentNotes || '');
+  };
+
+  const saveCareNotes = (petId: string) => {
+    updatePet(petId, { careNotes: careNotesDraft });
+    setEditingCareNotesPetId(null);
+    setCareNotesDraft('');
+    showToast('护理记录已更新');
+  };
+
+  const cancelEditCareNotes = () => {
+    setEditingCareNotesPetId(null);
+    setCareNotesDraft('');
+  };
+
+  const openEditPrefs = (petId: string, currentPrefs?: string[]) => {
+    setEditingPrefsPetId(petId);
+    setPrefsDraft((currentPrefs || []).join('\n'));
+    setEditPrefsOpen(true);
+  };
+
+  const savePrefs = () => {
+    if (!editingPrefsPetId) return;
+    const arr = prefsDraft
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    updatePet(editingPrefsPetId, { preferences: arr });
+    setEditPrefsOpen(false);
+    setEditingPrefsPetId(null);
+    setPrefsDraft('');
+    showToast('偏好标签已更新');
   };
 
   const handleEditSubmit = (data: EditMemberForm) => {
@@ -640,6 +684,84 @@ export default function MemberDetail() {
                                   💡 {pet.notes}
                                 </div>
                               )}
+
+                              <div className="mt-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-1.5 text-sm font-medium text-sage-600">
+                                    <Tag size={14} className="text-petal-500" />
+                                    偏好标签
+                                  </div>
+                                  <button
+                                    onClick={() => openEditPrefs(pet.id, pet.preferences)}
+                                    className="text-xs text-sage-500 hover:text-sage-700 font-medium flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-petal-50 transition-colors"
+                                  >
+                                    <Pencil size={12} />
+                                    编辑偏好
+                                  </button>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {pet.preferences && pet.preferences.length > 0 ? (
+                                    pet.preferences.map((pref, i) => (
+                                      <span
+                                        key={i}
+                                        className="px-2.5 py-1 text-xs font-medium rounded-full bg-petal-100 text-petal-700 border border-petal-200"
+                                      >
+                                        {pref}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-sage-400 italic">暂无偏好</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="mt-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-1.5 text-sm font-medium text-sage-600">
+                                    <Scissors size={14} className="text-terracotta-500" />
+                                    护理记录
+                                  </div>
+                                  {editingCareNotesPetId !== pet.id && (
+                                    <button
+                                      onClick={() => startEditCareNotes(pet.id, pet.careNotes)}
+                                      className="text-xs text-sage-500 hover:text-sage-700 font-medium flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-terracotta-50 transition-colors"
+                                    >
+                                      <Pencil size={12} />
+                                      编辑
+                                    </button>
+                                  )}
+                                </div>
+                                {editingCareNotesPetId === pet.id ? (
+                                  <div className="space-y-2">
+                                    <textarea
+                                      value={careNotesDraft}
+                                      onChange={(e) => setCareNotesDraft(e.target.value)}
+                                      rows={3}
+                                      placeholder="输入护理记录，如洗澡频率、皮肤问题、特别注意事项等..."
+                                      className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-terracotta-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-terracotta-400 focus:border-transparent resize-none"
+                                    />
+                                    <div className="flex gap-2 justify-end">
+                                      <button
+                                        onClick={cancelEditCareNotes}
+                                        className="px-3 py-1.5 text-xs rounded-lg bg-cream-200 text-sage-600 font-medium hover:bg-cream-300 transition-colors"
+                                      >
+                                        取消
+                                      </button>
+                                      <button
+                                        onClick={() => saveCareNotes(pet.id)}
+                                        className="px-3 py-1.5 text-xs rounded-lg bg-sage-600 text-white font-medium hover:bg-sage-700 transition-colors flex items-center gap-1"
+                                      >
+                                        <Save size={12} />
+                                        保存
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-white rounded-xl text-xs text-sage-500 border border-cream-100 whitespace-pre-wrap min-h-[60px]">
+                                    {pet.careNotes || <span className="text-sage-300 italic">暂无护理记录，点击编辑添加</span>}
+                                  </div>
+                                )}
+                              </div>
                             </div>
 
                             <button
@@ -1018,6 +1140,71 @@ export default function MemberDetail() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editPrefsOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditPrefsOpen(false)} />
+            <motion.div
+              className="relative w-full max-w-md bg-cream-50 rounded-3xl shadow-card-hover"
+              initial={{ scale: 0.95, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.95, y: 20, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            >
+              <div className="flex items-center justify-between p-6 border-b border-cream-200">
+                <h2 className="text-xl font-bold text-sage-700">编辑偏好标签</h2>
+                <button
+                  onClick={() => setEditPrefsOpen(false)}
+                  className="p-2 rounded-xl hover:bg-cream-200 text-sage-500 hover:text-sage-700 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-sage-600 mb-1.5">
+                    偏好标签
+                  </label>
+                  <p className="text-xs text-sage-400 mb-2">每行一个标签，例如：
+                    <br />怕吹风
+                    <br />耳朵敏感
+                    <br />泰迪圆头造型
+                  </p>
+                  <textarea
+                    value={prefsDraft}
+                    onChange={(e) => setPrefsDraft(e.target.value)}
+                    rows={6}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white border border-cream-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-petal-400 focus:border-transparent resize-none"
+                    placeholder="每行输入一个偏好标签..."
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditPrefsOpen(false)}
+                    className="flex-1 py-3 rounded-xl bg-cream-200 text-sage-600 font-semibold hover:bg-cream-300 transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={savePrefs}
+                    className="flex-1 py-3 rounded-xl bg-sage-600 text-white font-semibold hover:bg-sage-700 active:scale-[0.98] transition-all shadow-soft flex items-center justify-center gap-1.5"
+                  >
+                    <Save size={16} />
+                    保存
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </motion.div>
         )}

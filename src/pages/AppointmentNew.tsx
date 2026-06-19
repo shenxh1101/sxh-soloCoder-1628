@@ -15,6 +15,8 @@ import {
   CalendarDays,
   Loader2,
   X,
+  Bell,
+  ChevronDown,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
@@ -111,6 +113,7 @@ export default function AppointmentNew() {
   const [conflictInfo, setConflictInfo] = useState<Appointment | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [careReminderExpanded, setCareReminderExpanded] = useState(false);
 
   const filteredMembers = useMemo(() => {
     if (!search.trim()) return members;
@@ -510,6 +513,45 @@ export default function AppointmentNew() {
                       添加新宠物
                     </button>
                   </div>
+
+                  {selectedPet && (
+                    <div className="mt-6 p-5 bg-terracotta-50 border-2 border-terracotta-400 rounded-2xl">
+                      <h3 className="text-sm font-bold text-terracotta-700 mb-3 flex items-center gap-1.5">
+                        🐾 护理提醒 · {selectedPet.name}
+                      </h3>
+                      {(selectedPet.preferences && selectedPet.preferences.length > 0) || selectedPet.careNotes ? (
+                        <div className="space-y-3">
+                          {selectedPet.preferences && selectedPet.preferences.length > 0 && (
+                            <div>
+                              <div className="text-xs font-medium text-terracotta-600 mb-1.5">偏好标签</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {selectedPet.preferences.map((pref, i) => (
+                                  <span
+                                    key={i}
+                                    className="px-2.5 py-1 text-xs font-medium rounded-full bg-petal-100 text-petal-700 border border-petal-200"
+                                  >
+                                    {pref}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {selectedPet.careNotes && (
+                            <div>
+                              <div className="text-xs font-medium text-terracotta-600 mb-1.5">护理记录</div>
+                              <p className="text-xs text-sage-500 whitespace-pre-wrap leading-relaxed">
+                                {selectedPet.careNotes}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-sage-400 italic">
+                          暂未填写护理信息，请在会员档案中补充
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -622,7 +664,67 @@ export default function AppointmentNew() {
               )}
 
               {step === 4 && selectedGroomer && selectedService && (
-                <div>
+                <div className="relative">
+                  {selectedPet && (
+                    <div className="absolute -top-2 right-0 z-10">
+                      <div className="relative">
+                        <button
+                          onClick={() => setCareReminderExpanded(!careReminderExpanded)}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-terracotta-100 hover:bg-terracotta-200 text-terracotta-700 rounded-xl shadow-soft border border-terracotta-300 text-xs font-medium transition-colors"
+                        >
+                          <Bell size={14} />
+                          <span>🐾 {selectedPet.name} 护理提醒</span>
+                          <ChevronDown size={14} className={cn('transition-transform', careReminderExpanded && 'rotate-180')} />
+                        </button>
+                        <AnimatePresence>
+                          {careReminderExpanded && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                              transition={{ duration: 0.15 }}
+                              className="absolute right-0 top-full mt-2 w-72 p-4 bg-white rounded-2xl shadow-card-hover border border-terracotta-200"
+                            >
+                              <h4 className="text-sm font-bold text-terracotta-700 mb-2 flex items-center gap-1.5">
+                                🐾 护理提醒 · {selectedPet.name}
+                              </h4>
+                              {(selectedPet.preferences && selectedPet.preferences.length > 0) || selectedPet.careNotes ? (
+                                <div className="space-y-2.5">
+                                  {selectedPet.preferences && selectedPet.preferences.length > 0 && (
+                                    <div>
+                                      <div className="text-[11px] font-medium text-terracotta-600 mb-1">偏好标签</div>
+                                      <div className="flex flex-wrap gap-1">
+                                        {selectedPet.preferences.map((pref, i) => (
+                                          <span
+                                            key={i}
+                                            className="px-2 py-0.5 text-[11px] font-medium rounded-full bg-petal-100 text-petal-700"
+                                          >
+                                            {pref}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {selectedPet.careNotes && (
+                                    <div>
+                                      <div className="text-[11px] font-medium text-terracotta-600 mb-1">护理记录</div>
+                                      <p className="text-[11px] text-sage-500 whitespace-pre-wrap leading-relaxed">
+                                        {selectedPet.careNotes}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-[11px] text-sage-400 italic">
+                                  暂未填写护理信息
+                                </p>
+                              )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  )}
                   <h2 className="text-lg font-semibold text-sage-700 mb-1 flex items-center gap-2">
                     <CalendarDays className="w-5 h-5 text-sage-500" />
                     选择预约时间
@@ -731,7 +833,67 @@ export default function AppointmentNew() {
               )}
 
               {step === 5 && (
-                <div>
+                <div className="relative">
+                  {selectedPet && (
+                    <div className="absolute -top-2 right-0 z-10">
+                      <div className="relative">
+                        <button
+                          onClick={() => setCareReminderExpanded(!careReminderExpanded)}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-terracotta-100 hover:bg-terracotta-200 text-terracotta-700 rounded-xl shadow-soft border border-terracotta-300 text-xs font-medium transition-colors"
+                        >
+                          <Bell size={14} />
+                          <span>🐾 {selectedPet.name} 护理提醒</span>
+                          <ChevronDown size={14} className={cn('transition-transform', careReminderExpanded && 'rotate-180')} />
+                        </button>
+                        <AnimatePresence>
+                          {careReminderExpanded && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                              transition={{ duration: 0.15 }}
+                              className="absolute right-0 top-full mt-2 w-72 p-4 bg-white rounded-2xl shadow-card-hover border border-terracotta-200"
+                            >
+                              <h4 className="text-sm font-bold text-terracotta-700 mb-2 flex items-center gap-1.5">
+                                🐾 护理提醒 · {selectedPet.name}
+                              </h4>
+                              {(selectedPet.preferences && selectedPet.preferences.length > 0) || selectedPet.careNotes ? (
+                                <div className="space-y-2.5">
+                                  {selectedPet.preferences && selectedPet.preferences.length > 0 && (
+                                    <div>
+                                      <div className="text-[11px] font-medium text-terracotta-600 mb-1">偏好标签</div>
+                                      <div className="flex flex-wrap gap-1">
+                                        {selectedPet.preferences.map((pref, i) => (
+                                          <span
+                                            key={i}
+                                            className="px-2 py-0.5 text-[11px] font-medium rounded-full bg-petal-100 text-petal-700"
+                                          >
+                                            {pref}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {selectedPet.careNotes && (
+                                    <div>
+                                      <div className="text-[11px] font-medium text-terracotta-600 mb-1">护理记录</div>
+                                      <p className="text-[11px] text-sage-500 whitespace-pre-wrap leading-relaxed">
+                                        {selectedPet.careNotes}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-[11px] text-sage-400 italic">
+                                  暂未填写护理信息
+                                </p>
+                              )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  )}
                   <h2 className="text-lg font-semibold text-sage-700 mb-5 flex items-center gap-2">
                     <Check className="w-5 h-5 text-sage-500" />
                     确认预约信息

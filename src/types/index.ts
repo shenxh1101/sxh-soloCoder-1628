@@ -46,6 +46,8 @@ export interface Pet {
   weight?: number;
   avatar?: string;
   notes?: string;
+  careNotes?: string;
+  preferences?: string[];
 }
 
 export interface Appointment {
