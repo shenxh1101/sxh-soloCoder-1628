@@ -19,6 +19,7 @@ import {
   MemberLevel,
   PaymentMethod,
   PayType,
+  FollowUpRecord,
 } from '@/types';
 import {
   initAppointments,
@@ -58,6 +59,7 @@ interface AppState {
   consumptionRecords: ConsumptionRecord[];
   pointsRecords: PointsRecord[];
   exchangeRecords: ExchangeRecord[];
+  followUpRecords: FollowUpRecord[];
   initialized: boolean;
   smsEnabled: boolean;
   remindOffset: string;
@@ -76,7 +78,7 @@ interface AppState {
     startAt: string;
     endAt: string;
     notes?: string;
-  }) => { success: boolean; conflict?: Appointment };
+  }) => { success: boolean; id?: string; conflict?: Appointment };
   updateAppointment: (id: string, data: Partial<Appointment>) => void;
   cancelAppointment: (id: string) => void;
   checkConflict: (groomerId: string, startAt: Date, endAt: Date, excludeId?: string) => Appointment | null;
@@ -97,6 +99,10 @@ interface AppState {
   deleteRechargeRule: (id: string) => void;
 
   exchangePoints: (memberId: string, itemType: 'service' | 'product', itemName: string, pointsCost: number, itemId?: string) => { success: boolean; error?: string };
+
+  createFollowUp: (data: Omit<FollowUpRecord, 'id' | 'createdAt'>) => FollowUpRecord;
+  getFollowUpsByMember: (memberId: string) => FollowUpRecord[];
+  getFollowUpByAppointment: (appointmentId: string) => FollowUpRecord | undefined;
 
   getMonthlyRechargeStats: (year: number, month: number) => DailyStat[];
   getMonthlyServiceStats: (year: number, month: number) => ServiceStat[];
@@ -120,6 +126,7 @@ export const useAppStore = create<AppState>()(
       consumptionRecords: [],
       pointsRecords: [],
       exchangeRecords: [],
+      followUpRecords: [],
       initialized: false,
       smsEnabled: (() => {
         if (typeof window === 'undefined') return true;
@@ -188,17 +195,63 @@ export const useAppStore = create<AppState>()(
       initData: () => {
         const s = get();
         if (s.initialized) return;
+        const appointments = initAppointments();
+        const members = initMembers();
+        const pets = initPets();
+        const services = initServices();
+        const groomers = initGroomers();
+        const rechargeRules = initRechargeRules();
+        const rechargeRecords = initRechargeRecords();
+        const consumptionRecords = initConsumptionRecords();
+        const pointsRecords = initPointsRecords();
+        const exchangeRecords = initExchangeRecords();
+
+        let followUpRecords = s.followUpRecords.length > 0 ? s.followUpRecords : [];
+        if (followUpRecords.length === 0) {
+          const completedConsumptions = consumptionRecords.filter((c) => c.appointmentId).slice(0, 3);
+          const mockConditions = [
+            '毛发柔软无打结、指甲已修剪、精神状态良好，耳朵清洁无异味',
+            '皮肤状态健康，毛发顺滑，脚底毛已清理，肛门腺已挤',
+            '毛发有轻微打结已处理，指甲修剪整齐，活泼好动，配合度高',
+          ];
+          const mockFeedbacks = [
+            '客户很满意，称赞美容师耐心细致，下次还想预约小美做造型',
+            '整体服务很好，建议减少吹风温度，宠物有点怕热，下次想尝试SPA',
+            '客户反馈洗澡很干净，造型可爱，建议增加吹干时间，耳朵还有点湿',
+          ];
+          const mockSuggestions = [
+            '2周后洗澡，1个月后做造型修剪',
+            '3周后药浴护理，注意皮肤保湿',
+            '下月做SPA护理，平时注意每日梳毛',
+          ];
+          completedConsumptions.forEach((c, i) => {
+            if (c.memberId && c.petId && c.appointmentId) {
+              followUpRecords.push({
+                id: uid(),
+                memberId: c.memberId,
+                petId: c.petId,
+                appointmentId: c.appointmentId,
+                petCondition: mockConditions[i % mockConditions.length],
+                customerFeedback: mockFeedbacks[i % mockFeedbacks.length],
+                nextCareSuggestion: mockSuggestions[i % mockSuggestions.length],
+                createdAt: c.createdAt,
+              });
+            }
+          });
+        }
+
         set({
-          appointments: initAppointments(),
-          members: initMembers(),
-          pets: initPets(),
-          services: initServices(),
-          groomers: initGroomers(),
-          rechargeRules: initRechargeRules(),
-          rechargeRecords: initRechargeRecords(),
-          consumptionRecords: initConsumptionRecords(),
-          pointsRecords: initPointsRecords(),
-          exchangeRecords: initExchangeRecords(),
+          appointments,
+          members,
+          pets,
+          services,
+          groomers,
+          rechargeRules,
+          rechargeRecords,
+          consumptionRecords,
+          pointsRecords,
+          exchangeRecords,
+          followUpRecords,
           initialized: true,
         });
         get().processPendingSms();
@@ -222,6 +275,7 @@ export const useAppStore = create<AppState>()(
           consumptionRecords: [],
           pointsRecords: [],
           exchangeRecords: [],
+          followUpRecords: [],
           initialized: false,
         });
         get().initData();
@@ -245,6 +299,7 @@ export const useAppStore = create<AppState>()(
         const s = get();
         const conflict = s.checkConflict(data.groomerId, new Date(data.startAt), new Date(data.endAt));
         if (conflict) return { success: false, conflict };
+
         const apt: Appointment = {
           id: uid(),
           ...data,
@@ -254,7 +309,7 @@ export const useAppStore = create<AppState>()(
         };
         set({ appointments: [apt, ...s.appointments] });
         get().processPendingSms();
-        return { success: true };
+        return { success: true, id: apt.id };
       },
 
       updateAppointment: (id, data) => {
@@ -502,6 +557,29 @@ export const useAppStore = create<AppState>()(
         return { success: true };
       },
 
+      createFollowUp: (data) => {
+        const s = get();
+        const followUp: FollowUpRecord = {
+          id: uid(),
+          ...data,
+          createdAt: new Date().toISOString(),
+        };
+        set((st) => ({
+          followUpRecords: [followUp, ...st.followUpRecords],
+        }));
+        return followUp;
+      },
+
+      getFollowUpsByMember: (memberId) => {
+        return get()
+          .followUpRecords.filter((f) => f.memberId === memberId)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      },
+
+      getFollowUpByAppointment: (appointmentId) => {
+        return get().followUpRecords.find((f) => f.appointmentId === appointmentId);
+      },
+
       getMonthlyRechargeStats: (year, month) => {
         const start = startOfMonth(new Date(year, month));
         const end = endOfMonth(new Date(year, month));
@@ -600,6 +678,7 @@ export const useAppStore = create<AppState>()(
         consumptionRecords: state.consumptionRecords,
         pointsRecords: state.pointsRecords,
         exchangeRecords: state.exchangeRecords,
+        followUpRecords: state.followUpRecords,
         initialized: state.initialized,
         smsEnabled: state.smsEnabled,
         remindOffset: state.remindOffset,

@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   Save,
   Tag,
+  MessageSquareText,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { useAppStore } from '@/store';
@@ -60,7 +61,7 @@ const getAvatarGradient = (id: string) => {
 
 const getInitials = (name: string) => name.slice(0, 1);
 
-const tabKeys = ['pets', 'recharges', 'consumptions', 'points'] as const;
+const tabKeys = ['pets', 'recharges', 'consumptions', 'points', 'followUps'] as const;
 type TabKey = (typeof tabKeys)[number];
 
 const tabLabels: Record<TabKey, string> = {
@@ -68,6 +69,7 @@ const tabLabels: Record<TabKey, string> = {
   recharges: '充值记录',
   consumptions: '消费记录',
   points: '积分明细',
+  followUps: '📝 服务回访',
 };
 
 type EditMemberForm = {
@@ -319,6 +321,8 @@ export default function MemberDetail() {
   const rechargeRules = useAppStore((s) => s.rechargeRules);
   const consumptionRecords = useAppStore((s) => s.consumptionRecords);
   const pointsRecords = useAppStore((s) => s.pointsRecords);
+  const getFollowUpsByMember = useAppStore((s) => s.getFollowUpsByMember);
+  const followUpRecords = useAppStore((s) => s.followUpRecords);
   const updateMember = useAppStore((s) => s.updateMember);
   const rechargeMember = useAppStore((s) => s.rechargeMember);
   const createPet = useAppStore((s) => s.createPet);
@@ -351,6 +355,19 @@ export default function MemberDetail() {
     () => pointsRecords.filter((p) => p.memberId === id),
     [pointsRecords, id]
   );
+  const memberFollowUps = useMemo(
+    () => (id ? getFollowUpsByMember(id) : []),
+    [id, getFollowUpsByMember, followUpRecords],
+  );
+  const [expandedFollowUps, setExpandedFollowUps] = useState<Set<string>>(new Set());
+
+  const toggleFollowUpExpand = (id: string) => {
+    setExpandedFollowUps((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   const totalRecharge = useMemo(
     () => memberRecharges.reduce((sum, r) => sum + r.amount + r.bonusAmount, 0),
@@ -1027,6 +1044,123 @@ export default function MemberDetail() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
+              {activeTab === 'followUps' && (
+                <motion.div
+                  key="followUps"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {memberFollowUps.length === 0 ? (
+                    <div className="py-16 text-center">
+                      <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-cream-100 flex items-center justify-center">
+                        <MessageSquareText className="w-10 h-10 text-sage-300" />
+                      </div>
+                      <p className="text-sage-600 font-medium mb-1">暂无回访记录</p>
+                      <p className="text-sm text-sage-400">完成服务时可记录服务回访</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {memberFollowUps.map((fu) => {
+                        const fuPet = pets.find((p) => p.id === fu.petId);
+                        const isExpanded = expandedFollowUps.has(fu.id);
+                        return (
+                          <div
+                            key={fu.id}
+                            className="rounded-2xl2 bg-white border border-sage-100 overflow-hidden shadow-soft transition-all hover:shadow-card-hover"
+                          >
+                            <button
+                              onClick={() => toggleFollowUpExpand(fu.id)}
+                              className="w-full p-4 flex items-center justify-between gap-3 text-left"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                                  <span className="text-xs font-semibold text-sage-700">
+                                    {format(parseISO(fu.createdAt), 'yyyy-MM-dd HH:mm')}
+                                  </span>
+                                  {fuPet && (
+                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-petal-100 text-petal-600 font-medium">
+                                      <PawPrint className="w-3 h-3" />
+                                      {fuPet.name}
+                                    </span>
+                                  )}
+                                  <Link
+                                    to={`/appointments/${fu.appointmentId}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-xs px-2 py-0.5 rounded-full bg-sky2-100 text-sky2-600 font-medium hover:bg-sky2-200 transition-colors"
+                                  >
+                                    #{fu.appointmentId.slice(-6)} 预约
+                                  </Link>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-[11px]">
+                                  <div className="truncate text-sage-500">
+                                    <span className="text-sage-400">👤 </span>
+                                    {fu.petCondition || '无'}
+                                  </div>
+                                  <div className="truncate text-sage-500">
+                                    <span className="text-sage-400">💬 </span>
+                                    {fu.customerFeedback || '无'}
+                                  </div>
+                                  <div className="truncate text-sage-500">
+                                    <span className="text-sage-400">📅 </span>
+                                    {fu.nextCareSuggestion || '无'}
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronDown
+                                className={cn(
+                                  'w-5 h-5 text-sage-400 shrink-0 transition-transform duration-200',
+                                  isExpanded && 'rotate-180'
+                                )}
+                              />
+                            </button>
+                            <AnimatePresence>
+                              {isExpanded && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="px-4 pb-4 space-y-3 border-t border-sage-100 pt-3">
+                                    <div className="p-3 rounded-xl bg-sage-50/60 border border-sage-100">
+                                      <div className="text-xs font-semibold text-sage-600 mb-1 flex items-center gap-1.5">
+                                        <span>👤</span>宠物状态
+                                      </div>
+                                      <p className="text-sm text-sage-700 leading-relaxed whitespace-pre-wrap">
+                                        {fu.petCondition || <span className="text-sage-400 italic">无记录</span>}
+                                      </p>
+                                    </div>
+                                    <div className="p-3 rounded-xl bg-petal-50/60 border border-petal-100">
+                                      <div className="text-xs font-semibold text-petal-600 mb-1 flex items-center gap-1.5">
+                                        <span>💬</span>客户反馈
+                                      </div>
+                                      <p className="text-sm text-sage-700 leading-relaxed whitespace-pre-wrap">
+                                        {fu.customerFeedback || <span className="text-sage-400 italic">无记录</span>}
+                                      </p>
+                                    </div>
+                                    <div className="p-3 rounded-xl bg-terracotta-50/60 border border-terracotta-100">
+                                      <div className="text-xs font-semibold text-terracotta-600 mb-1 flex items-center gap-1.5">
+                                        <span>📅</span>下次建议护理
+                                      </div>
+                                      <p className="text-sm text-sage-700 leading-relaxed whitespace-pre-wrap">
+                                        {fu.nextCareSuggestion || <span className="text-sage-400 italic">无记录</span>}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </motion.div>

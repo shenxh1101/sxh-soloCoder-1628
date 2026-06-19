@@ -83,6 +83,17 @@ export interface RechargeRecord {
   createdAt: string;
 }
 
+export interface FollowUpRecord {
+  id: string;
+  memberId: string;
+  petId: string;
+  appointmentId: string;
+  petCondition: string;
+  customerFeedback: string;
+  nextCareSuggestion: string;
+  createdAt: string;
+}
+
 export interface ConsumptionRecord {
   id: string;
   memberId: string;
@@ -95,6 +106,7 @@ export interface ConsumptionRecord {
   pointsEarned: number;
   createdAt: string;
   notes?: string;
+  followUpId?: string;
 }
 
 export interface PointsRecord {

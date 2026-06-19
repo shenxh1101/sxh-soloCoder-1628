@@ -326,11 +326,14 @@ interface CompletePaymentModalProps {
   apt: Appointment;
   member: { id: string; name: string; phone: string; balance: number; points: number; serviceCredits: { serviceId: string; count: number }[] };
   service: { id: string; name: string; price: number };
-  pet?: { name: string };
+  pet?: { name: string; id: string };
   completeAppointment: (id: string, payType: PayType) => { success: boolean; error?: string };
+  createFollowUp: (data: { memberId: string; petId: string; appointmentId: string; petCondition: string; customerFeedback: string; nextCareSuggestion: string }) => void;
   showToast: (text: string) => void;
   navigateToList: () => void;
 }
+
+const quickSuggestions = ['2周后洗澡', '1个月后造型', '3周后药浴'];
 
 function CompletePaymentModal({
   open,
@@ -340,16 +343,27 @@ function CompletePaymentModal({
   service,
   pet,
   completeAppointment,
+  createFollowUp,
   showToast,
   navigateToList,
 }: CompletePaymentModalProps) {
   const [selectedPayType, setSelectedPayType] = useState<PayType | null>(null);
   const [completeMsg, setCompleteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [petCondition, setPetCondition] = useState('');
+  const [customerFeedback, setCustomerFeedback] = useState('');
+  const [nextCareSuggestion, setNextCareSuggestion] = useState('');
+  const [customSuggestion, setCustomSuggestion] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(true);
 
   useEffect(() => {
     if (open) {
       setSelectedPayType(null);
       setCompleteMsg(null);
+      setPetCondition('');
+      setCustomerFeedback('');
+      setNextCareSuggestion('');
+      setCustomSuggestion(false);
+      setFollowUpOpen(true);
     }
   }, [open]);
 
@@ -368,12 +382,27 @@ function CompletePaymentModal({
   const newBalance = selectedPayType === 'balance' ? member.balance - service.price : member.balance;
   const newCredits = selectedPayType === 'credit' ? creditCount - 1 : creditCount;
 
+  const hasFollowUpContent = petCondition.trim() || customerFeedback.trim() || nextCareSuggestion.trim();
+
   const handleConfirm = () => {
     if (!selectedPayType) return;
     const res = completeAppointment(apt.id, selectedPayType);
     if (res.success) {
-      setCompleteMsg({ type: 'success', text: '服务完成，消费记录已生成' });
-      showToast('服务已完成');
+      if (hasFollowUpContent && pet?.id) {
+        createFollowUp({
+          memberId: apt.memberId,
+          petId: pet.id,
+          appointmentId: apt.id,
+          petCondition: petCondition.trim(),
+          customerFeedback: customerFeedback.trim(),
+          nextCareSuggestion: nextCareSuggestion.trim(),
+        });
+        setCompleteMsg({ type: 'success', text: '服务完成，回访已记录' });
+        showToast('服务完成，回访已记录');
+      } else {
+        setCompleteMsg({ type: 'success', text: '服务完成，消费记录已生成' });
+        showToast('服务已完成');
+      }
       setTimeout(() => {
         onClose();
         navigateToList();
@@ -607,6 +636,117 @@ function CompletePaymentModal({
                     </div>
                   )}
 
+                  <div className="mt-5 rounded-2xl2 border border-sage-100 bg-cream-50/50 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setFollowUpOpen(!followUpOpen)}
+                      className="w-full flex items-center justify-between p-4 text-left hover:bg-cream-100/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📝</span>
+                        <span className="text-sm font-semibold text-sage-700">服务回访</span>
+                        {hasFollowUpContent && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-terracotta-100 text-terracotta-500 font-medium">
+                            已填写
+                          </span>
+                        )}
+                      </div>
+                      <ChevronRight
+                        className={cn(
+                          'w-5 h-5 text-sage-400 transition-transform duration-200',
+                          followUpOpen && 'rotate-90'
+                        )}
+                      />
+                    </button>
+                    <AnimatePresence>
+                      {followUpOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="p-4 pt-0 space-y-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                                🐾 宠物状态
+                              </label>
+                              <textarea
+                                value={petCondition}
+                                onChange={(e) => setPetCondition(e.target.value)}
+                                rows={2}
+                                placeholder="如：毛发柔软无打结、指甲已修剪、精神状态良好"
+                                className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                                💬 客户反馈
+                              </label>
+                              <textarea
+                                value={customerFeedback}
+                                onChange={(e) => setCustomerFeedback(e.target.value)}
+                                rows={2}
+                                placeholder="如：客户很满意、下次想尝试造型、建议减少洗澡频率"
+                                className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                                📅 下次建议护理
+                              </label>
+                              <div className="flex flex-wrap gap-1.5 mb-2">
+                                {quickSuggestions.map((s) => {
+                                  const selected = nextCareSuggestion === s && !customSuggestion;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={s}
+                                      onClick={() => {
+                                        setNextCareSuggestion(s);
+                                        setCustomSuggestion(false);
+                                      }}
+                                      className={cn(
+                                        'px-3 py-1.5 text-xs rounded-full font-medium transition-all border-2',
+                                        selected
+                                          ? 'bg-terracotta-400 text-white border-terracotta-400 shadow-soft'
+                                          : 'bg-white text-sage-600 border-sage-200 hover:border-sage-300 hover:bg-cream-100'
+                                      )}
+                                    >
+                                      {s}
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  onClick={() => setCustomSuggestion(true)}
+                                  className={cn(
+                                    'px-3 py-1.5 text-xs rounded-full font-medium transition-all border-2',
+                                    customSuggestion
+                                      ? 'bg-sage-500 text-white border-sage-500 shadow-soft'
+                                      : 'bg-white text-sage-600 border-sage-200 hover:border-sage-300 hover:bg-cream-100'
+                                  )}
+                                >
+                                  ✏️ 自定义
+                                </button>
+                              </div>
+                              {customSuggestion && (
+                                <textarea
+                                  value={nextCareSuggestion}
+                                  onChange={(e) => setNextCareSuggestion(e.target.value)}
+                                  rows={2}
+                                  placeholder="输入自定义的下次护理建议..."
+                                  className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
                   <button
                     onClick={handleConfirm}
                     disabled={!selectedPayType}
@@ -640,9 +780,12 @@ export default function AppointmentDetail() {
   const services = useAppStore((s) => s.services);
   const groomers = useAppStore((s) => s.groomers);
   const consumptionRecords = useAppStore((s) => s.consumptionRecords);
+  const followUpRecords = useAppStore((s) => s.followUpRecords);
   const updateAppointment = useAppStore((s) => s.updateAppointment);
   const cancelAppointment = useAppStore((s) => s.cancelAppointment);
   const completeAppointment = useAppStore((s) => s.completeAppointment);
+  const createFollowUp = useAppStore((s) => s.createFollowUp);
+  const getFollowUpByAppointment = useAppStore((s) => s.getFollowUpByAppointment);
   const checkConflict = useAppStore((s) => s.checkConflict);
   const initData = useAppStore((s) => s.initData);
   const initialized = useAppStore((s) => s.initialized);
@@ -660,10 +803,18 @@ export default function AppointmentDetail() {
     () => consumptionRecords.find((c) => c.appointmentId === apt?.id) ?? null,
     [consumptionRecords, apt],
   );
+  const followUp = useMemo(
+    () => (apt ? getFollowUpByAppointment(apt.id) : undefined),
+    [apt, getFollowUpByAppointment, followUpRecords],
+  );
 
   const [showComplete, setShowComplete] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showFollowUp, setShowFollowUp] = useState(false);
+  const [followUpPetCondition, setFollowUpPetCondition] = useState('');
+  const [followUpCustomerFeedback, setFollowUpCustomerFeedback] = useState('');
+  const [followUpNextCare, setFollowUpNextCare] = useState('');
   const [actionToast, setActionToast] = useState<string | null>(null);
 
   const isLoading = !initialized || appointments.length === 0;
@@ -710,6 +861,27 @@ export default function AppointmentDetail() {
       setShowComplete(false);
       navigateToList();
     }
+  };
+
+  const openFollowUpModal = () => {
+    setFollowUpPetCondition('');
+    setFollowUpCustomerFeedback('');
+    setFollowUpNextCare('');
+    setShowFollowUp(true);
+  };
+
+  const handleSaveFollowUp = () => {
+    if (!apt || !pet) return;
+    createFollowUp({
+      memberId: apt.memberId,
+      petId: pet.id,
+      appointmentId: apt.id,
+      petCondition: followUpPetCondition.trim(),
+      customerFeedback: followUpCustomerFeedback.trim(),
+      nextCareSuggestion: followUpNextCare.trim(),
+    });
+    setShowFollowUp(false);
+    showToast('回访已补录');
   };
 
   if (isLoading) {
@@ -883,40 +1055,74 @@ export default function AppointmentDetail() {
 
             <InfoBlock icon={PawPrint} title="宠物信息">
               {pet ? (
-                <div className="p-3 rounded-xl bg-cream-50">
-                  <div className="flex items-center gap-4">
-                    <Avatar name={pet.name} className="w-14 h-14 text-lg" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-sage-800 text-lg">{pet.name}</span>
-                        <span className={cn(
-                          'text-xs px-2 py-0.5 rounded-full',
-                          pet.gender === '公' ? 'bg-sky2-100 text-sky2-600' : 'bg-petal-100 text-petal-400',
-                        )}>
-                          {pet.gender === '公' ? '公' : '母'}
-                        </span>
-                      </div>
-                      <div className="text-sm text-sage-500 flex flex-wrap gap-x-4 gap-y-0.5">
-                        <span>品种：{pet.breed}</span>
-                        {pet.weight && <span>{pet.weight}kg</span>}
-                        {pet.birthday && <span>{pet.birthday}</span>}
-                      </div>
-                      {pet.notes && (
-                        <div className="mt-2 p-2 rounded-lg bg-white text-xs text-sage-500 border border-cream-200">
-                          {pet.notes}
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-cream-50">
+                    <div className="flex items-center gap-4">
+                      <Avatar name={pet.name} className="w-14 h-14 text-lg" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-semibold text-sage-800 text-lg">{pet.name}</span>
+                          <span className={cn(
+                            'text-xs px-2 py-0.5 rounded-full',
+                            pet.gender === '公' ? 'bg-sky2-100 text-sky2-600' : 'bg-petal-100 text-petal-400',
+                          )}>
+                            {pet.gender === '公' ? '公' : '母'}
+                          </span>
                         </div>
+                        <div className="text-sm text-sage-500 flex flex-wrap gap-x-4 gap-y-0.5">
+                          <span>品种：{pet.breed}</span>
+                          {pet.weight && <span>{pet.weight}kg</span>}
+                          {pet.birthday && <span>{pet.birthday}</span>}
+                        </div>
+                        {pet.notes && (
+                          <div className="mt-2 p-2 rounded-lg bg-white text-xs text-sage-500 border border-cream-200">
+                            {pet.notes}
+                          </div>
+                        )}
+                      </div>
+                      {member && (
+                        <button
+                          onClick={() => navigate(`/members/${member.id}`)}
+                          className="flex items-center gap-1 px-3 py-2 rounded-lg border border-sage-200 text-xs font-medium text-sage-600 hover:bg-sage-50 hover:text-sage-700 transition-colors shrink-0"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          服务历史
+                        </button>
                       )}
                     </div>
-                    {member && (
-                      <button
-                        onClick={() => navigate(`/members/${member.id}`)}
-                        className="flex items-center gap-1 px-3 py-2 rounded-lg border border-sage-200 text-xs font-medium text-sage-600 hover:bg-sage-50 hover:text-sage-700 transition-colors shrink-0"
-                      >
-                        <History className="w-3.5 h-3.5" />
-                        服务历史
-                      </button>
-                    )}
                   </div>
+                  {((pet.preferences && pet.preferences.length > 0) || pet.careNotes) && (
+                    <div className="p-3 rounded-xl bg-terracotta-50 border border-terracotta-200">
+                      <h4 className="text-sm font-bold text-terracotta-700 mb-2 flex items-center gap-1.5">
+                        🐾 护理提醒
+                      </h4>
+                      <div className="space-y-2">
+                        {pet.preferences && pet.preferences.length > 0 && (
+                          <div>
+                            <div className="text-[11px] font-medium text-terracotta-600 mb-1">偏好标签</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {pet.preferences.map((pref, i) => (
+                                <span
+                                  key={i}
+                                  className="px-2.5 py-1 text-[11px] font-medium rounded-full bg-petal-100 text-petal-700 border border-petal-200"
+                                >
+                                  {pref}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {pet.careNotes && (
+                          <div>
+                            <div className="text-[11px] font-medium text-terracotta-600 mb-1">护理记录</div>
+                            <p className="text-[11px] text-sage-600 whitespace-pre-wrap leading-relaxed">
+                              {pet.careNotes}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <EmptyHint text="宠物信息已丢失" />
@@ -1012,6 +1218,59 @@ export default function AppointmentDetail() {
                   serviceName={service?.name}
                   groomerName={groomer?.name}
                 />
+              </InfoBlock>
+            )}
+
+            {apt.status === 'completed' && (
+              <InfoBlock icon={MessageSquareText} title="📝 服务回访">
+                {followUp ? (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-sage-100 bg-gradient-to-br from-sage-50/60 to-cream-50 p-4">
+                      <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-sage-600">
+                        <span className="text-base">👤</span>
+                        宠物状态
+                      </div>
+                      <p className="text-sm text-sage-700 leading-relaxed whitespace-pre-wrap">
+                        {followUp.petCondition || <span className="text-sage-400 italic">无记录</span>}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-petal-100 bg-gradient-to-br from-petal-50/60 to-cream-50 p-4">
+                      <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-petal-600">
+                        <span className="text-base">💬</span>
+                        客户反馈
+                      </div>
+                      <p className="text-sm text-sage-700 leading-relaxed whitespace-pre-wrap">
+                        {followUp.customerFeedback || <span className="text-sage-400 italic">无记录</span>}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-terracotta-100 bg-gradient-to-br from-terracotta-50/60 to-cream-50 p-4">
+                      <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-terracotta-600">
+                        <span className="text-base">📅</span>
+                        下次建议护理
+                      </div>
+                      <p className="text-sm text-sage-700 leading-relaxed whitespace-pre-wrap">
+                        {followUp.nextCareSuggestion || <span className="text-sage-400 italic">无记录</span>}
+                      </p>
+                      <p className="mt-2 text-[11px] text-sage-400">
+                        记录时间：{format(new Date(followUp.createdAt), 'yyyy-MM-dd HH:mm')}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-8 text-center">
+                    <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-cream-100 flex items-center justify-center">
+                      <MessageSquareText className="w-8 h-8 text-sage-300" />
+                    </div>
+                    <p className="text-sm text-sage-500 mb-3">暂无回访记录</p>
+                    <button
+                      onClick={openFollowUpModal}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-terracotta-400 hover:bg-terracotta-500 text-white text-xs font-semibold shadow-soft transition-all hover:-translate-y-0.5"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      补录回访
+                    </button>
+                  </div>
+                )}
               </InfoBlock>
             )}
 
@@ -1185,6 +1444,7 @@ export default function AppointmentDetail() {
           service={service}
           pet={pet}
           completeAppointment={completeAppointment}
+          createFollowUp={createFollowUp}
           showToast={showToast}
           navigateToList={navigateToList}
         />
@@ -1237,6 +1497,98 @@ export default function AppointmentDetail() {
                   className="flex-1 px-4 py-2.5 rounded-xl bg-petal-500 text-white text-sm font-medium hover:bg-petal-600 transition-colors shadow-soft"
                 >
                   确认取消
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showFollowUp && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-sage-700/30 backdrop-blur-sm p-4"
+            onClick={() => setShowFollowUp(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-2xl2 bg-white shadow-card-hover overflow-hidden"
+            >
+              <div className="px-6 pt-6 pb-4 flex items-center justify-between border-b border-sage-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-terracotta-100 flex items-center justify-center">
+                    <MessageSquareText className="w-5 h-5 text-terracotta-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-sage-700">补录服务回访</h3>
+                    <p className="text-xs text-sage-500 mt-0.5">
+                      {pet?.name} · {service?.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowFollowUp(false)}
+                  className="w-9 h-9 rounded-lg hover:bg-cream-100 flex items-center justify-center text-sage-400 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                    🐾 宠物状态
+                  </label>
+                  <textarea
+                    value={followUpPetCondition}
+                    onChange={(e) => setFollowUpPetCondition(e.target.value)}
+                    rows={3}
+                    placeholder="如：毛发柔软无打结、指甲已修剪、精神状态良好"
+                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-cream-50 border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                    💬 客户反馈
+                  </label>
+                  <textarea
+                    value={followUpCustomerFeedback}
+                    onChange={(e) => setFollowUpCustomerFeedback(e.target.value)}
+                    rows={3}
+                    placeholder="如：客户很满意、下次想尝试造型、建议减少洗澡频率"
+                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-cream-50 border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                    📅 下次建议护理
+                  </label>
+                  <textarea
+                    value={followUpNextCare}
+                    onChange={(e) => setFollowUpNextCare(e.target.value)}
+                    rows={2}
+                    placeholder="如：2周后洗澡、下月做SPA"
+                    className="w-full px-3 py-2.5 text-sm rounded-xl bg-cream-50 border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                  />
+                </div>
+              </div>
+              <div className="px-6 pb-6 pt-2 flex gap-3">
+                <button
+                  onClick={() => setShowFollowUp(false)}
+                  className="flex-1 px-4 py-3 rounded-xl bg-white border border-sage-200 text-sm font-medium text-sage-600 hover:bg-sage-50 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSaveFollowUp}
+                  className="flex-1 px-4 py-3 rounded-xl bg-terracotta-400 hover:bg-terracotta-500 text-white text-sm font-semibold shadow-soft transition-all hover:-translate-y-0.5"
+                >
+                  保存回访
                 </button>
               </div>
             </motion.div>

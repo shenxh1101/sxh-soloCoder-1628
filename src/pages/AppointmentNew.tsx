@@ -201,9 +201,6 @@ export default function AppointmentNew() {
     setSelectedMember(m);
     setSelectedPet(null);
     setTimeout(() => goNext(), 150);
-    if (memberPets.length === 0) {
-      setTimeout(() => setShowAddPet(true), 400);
-    }
   };
 
   const handleAddMember = () => {
@@ -215,7 +212,6 @@ export default function AppointmentNew() {
     setNewMemberName('');
     setNewMemberPhone('');
     setTimeout(() => goNext(), 150);
-    setTimeout(() => setShowAddPet(true), 400);
   };
 
   const handleSelectPet = (p: Pet) => {
@@ -272,11 +268,10 @@ export default function AppointmentNew() {
       notes: notes.trim() || undefined,
     });
     setSubmitting(false);
-    if (result.success) {
-      const lastCreated = appointments[0];
-      setToast('预约创建成功！');
+    if (result.success && result.id) {
+      setToast('预约创建成功，即将进入详情...');
       setTimeout(() => {
-        navigate(`/appointments/${lastCreated.id}`);
+        navigate(`/appointments/${result.id}`);
       }, 800);
     } else if (result.conflict) {
       setConflictStatus('conflict');

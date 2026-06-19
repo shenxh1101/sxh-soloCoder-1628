@@ -51,7 +51,7 @@ import {
   parseISO,
 } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import type { Appointment, AppointmentStatus, PayType, Pet, Member, Service, Groomer } from '@/types';
+import type { Appointment, AppointmentStatus, PayType, Pet, Member, Service, Groomer, ServiceCategory } from '@/types';
 
 const statusConfig: Record<AppointmentStatus, { label: string; className: string; bg: string }> = {
   pending: { label: '待确认', className: 'bg-petal-100 text-petal-400 border-petal-200', bg: 'bg-petal-300' },
@@ -385,8 +385,11 @@ interface CompletePaymentModalProps {
   services: Service[];
   pets: Pet[];
   completeAppointment: (id: string, payType: PayType) => { success: boolean; error?: string };
+  createFollowUp: (data: { memberId: string; petId: string; appointmentId: string; petCondition: string; customerFeedback: string; nextCareSuggestion: string }) => void;
   showToast: (text: string) => void;
 }
+
+const quickSuggestions = ['2周后洗澡', '1个月后造型', '3周后药浴'];
 
 function CompletePaymentModal({
   open,
@@ -396,15 +399,26 @@ function CompletePaymentModal({
   services,
   pets,
   completeAppointment,
+  createFollowUp,
   showToast,
 }: CompletePaymentModalProps) {
   const [selectedPayType, setSelectedPayType] = useState<PayType | null>(null);
   const [completeMsg, setCompleteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [petCondition, setPetCondition] = useState('');
+  const [customerFeedback, setCustomerFeedback] = useState('');
+  const [nextCareSuggestion, setNextCareSuggestion] = useState('');
+  const [customSuggestion, setCustomSuggestion] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(true);
 
   useEffect(() => {
     if (open) {
       setSelectedPayType(null);
       setCompleteMsg(null);
+      setPetCondition('');
+      setCustomerFeedback('');
+      setNextCareSuggestion('');
+      setCustomSuggestion(false);
+      setFollowUpOpen(true);
     }
   }, [open]);
 
@@ -431,12 +445,27 @@ function CompletePaymentModal({
     : member?.balance ?? 0;
   const newCredits = selectedPayType === 'credit' ? creditCount - 1 : creditCount;
 
+  const hasFollowUpContent = petCondition.trim() || customerFeedback.trim() || nextCareSuggestion.trim();
+
   const handleConfirm = () => {
-    if (!selectedPayType || !appointment || !service || !member) return;
+    if (!selectedPayType || !appointment || !service || !member || !pet) return;
     const res = completeAppointment(appointment.id, selectedPayType);
     if (res.success) {
-      setCompleteMsg({ type: 'success', text: '服务完成，消费记录已生成 🎉' });
-      showToast('预约更新成功');
+      if (hasFollowUpContent) {
+        createFollowUp({
+          memberId: appointment.memberId,
+          petId: appointment.petId,
+          appointmentId: appointment.id,
+          petCondition: petCondition.trim(),
+          customerFeedback: customerFeedback.trim(),
+          nextCareSuggestion: nextCareSuggestion.trim(),
+        });
+        setCompleteMsg({ type: 'success', text: '服务完成，回访已记录' });
+        showToast('服务完成，回访已记录');
+      } else {
+        setCompleteMsg({ type: 'success', text: '服务完成，消费记录已生成 🎉' });
+        showToast('预约更新成功');
+      }
       setTimeout(() => {
         onClose();
       }, 1200);
@@ -669,6 +698,117 @@ function CompletePaymentModal({
                     </div>
                   )}
 
+                  <div className="mt-5 rounded-2xl2 border border-sage-100 bg-cream-50/50 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setFollowUpOpen(!followUpOpen)}
+                      className="w-full flex items-center justify-between p-4 text-left hover:bg-cream-100/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📝</span>
+                        <span className="text-sm font-semibold text-sage-700">服务回访</span>
+                        {hasFollowUpContent && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-terracotta-100 text-terracotta-500 font-medium">
+                            已填写
+                          </span>
+                        )}
+                      </div>
+                      <ChevronRight
+                        className={cn(
+                          'w-5 h-5 text-sage-400 transition-transform duration-200',
+                          followUpOpen && 'rotate-90'
+                        )}
+                      />
+                    </button>
+                    <AnimatePresence>
+                      {followUpOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="p-4 pt-0 space-y-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                                🐾 宠物状态
+                              </label>
+                              <textarea
+                                value={petCondition}
+                                onChange={(e) => setPetCondition(e.target.value)}
+                                rows={2}
+                                placeholder="如：毛发柔软无打结、指甲已修剪、精神状态良好"
+                                className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                                💬 客户反馈
+                              </label>
+                              <textarea
+                                value={customerFeedback}
+                                onChange={(e) => setCustomerFeedback(e.target.value)}
+                                rows={2}
+                                placeholder="如：客户很满意、下次想尝试造型、建议减少洗澡频率"
+                                className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-sage-600 mb-1.5">
+                                📅 下次建议护理
+                              </label>
+                              <div className="flex flex-wrap gap-1.5 mb-2">
+                                {quickSuggestions.map((s) => {
+                                  const selected = nextCareSuggestion === s && !customSuggestion;
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={s}
+                                      onClick={() => {
+                                        setNextCareSuggestion(s);
+                                        setCustomSuggestion(false);
+                                      }}
+                                      className={cn(
+                                        'px-3 py-1.5 text-xs rounded-full font-medium transition-all border-2',
+                                        selected
+                                          ? 'bg-terracotta-400 text-white border-terracotta-400 shadow-soft'
+                                          : 'bg-white text-sage-600 border-sage-200 hover:border-sage-300 hover:bg-cream-100'
+                                      )}
+                                    >
+                                      {s}
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  onClick={() => setCustomSuggestion(true)}
+                                  className={cn(
+                                    'px-3 py-1.5 text-xs rounded-full font-medium transition-all border-2',
+                                    customSuggestion
+                                      ? 'bg-sage-500 text-white border-sage-500 shadow-soft'
+                                      : 'bg-white text-sage-600 border-sage-200 hover:border-sage-300 hover:bg-cream-100'
+                                  )}
+                                >
+                                  ✏️ 自定义
+                                </button>
+                              </div>
+                              {customSuggestion && (
+                                <textarea
+                                  value={nextCareSuggestion}
+                                  onChange={(e) => setNextCareSuggestion(e.target.value)}
+                                  rows={2}
+                                  placeholder="输入自定义的下次护理建议..."
+                                  className="w-full px-3 py-2 text-xs rounded-xl bg-white border border-sage-200 text-sage-700 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-400 focus:border-transparent resize-none"
+                                />
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
                   <button
                     onClick={handleConfirm}
                     disabled={!selectedPayType}
@@ -702,6 +842,7 @@ export default function AppointmentList() {
   const groomers = useAppStore((s) => s.groomers);
   const cancelAppointment = useAppStore((s) => s.cancelAppointment);
   const completeAppointment = useAppStore((s) => s.completeAppointment);
+  const createFollowUp = useAppStore((s) => s.createFollowUp);
   const updateAppointment = useAppStore((s) => s.updateAppointment);
   const checkConflict = useAppStore((s) => s.checkConflict);
 
@@ -709,6 +850,8 @@ export default function AppointmentList() {
   const [cursor, setCursor] = useState(new Date());
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<AppointmentStatus | 'all'>('all');
+  const [groomerFilter, setGroomerFilter] = useState<string>('all');
+  const [serviceFilter, setServiceFilter] = useState<ServiceCategory | 'all'>('all');
   const [focusedDay, setFocusedDay] = useState<Date | null>(null);
   const [hoverDay, setHoverDay] = useState<Date | null>(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
@@ -720,6 +863,25 @@ export default function AppointmentList() {
   const getMember: FinderFn<Member> = (id) => members.find((m) => m.id === id);
   const getService: FinderFn<Service> = (id) => services.find((s) => s.id === id);
   const getGroomer: FinderFn<Groomer> = (id) => groomers.find((g) => g.id === id);
+
+  const serviceCategoryOptions = useMemo(() => {
+    const set = new Set<ServiceCategory>();
+    services.forEach((s) => set.add(s.category));
+    return Array.from(set);
+  }, [services]);
+
+  const activeGroomers = useMemo(() => groomers.filter((g) => g.isActive), [groomers]);
+
+  const viewFilteredAppointments = useMemo(() => {
+    return appointments.filter((a) => {
+      if (groomerFilter !== 'all' && a.groomerId !== groomerFilter) return false;
+      if (serviceFilter !== 'all') {
+        const svc = getService(a.serviceId);
+        if (!svc || svc.category !== serviceFilter) return false;
+      }
+      return true;
+    });
+  }, [appointments, groomerFilter, serviceFilter, getService]);
 
   const calendarRange = useMemo(() => {
     if (viewMode === 'month') {
@@ -736,7 +898,7 @@ export default function AppointmentList() {
   }, [viewMode, cursor]);
 
   const getDayAppointments = (day: Date) =>
-    appointments.filter((a) => isSameDay(new Date(a.startAt), day));
+    viewFilteredAppointments.filter((a) => isSameDay(new Date(a.startAt), day));
 
   const conflicts = useMemo(() => {
     const result: string[] = [];
@@ -776,6 +938,15 @@ export default function AppointmentList() {
     let list = appointments.filter((a) =>
       isWithinInterval(new Date(a.createdAt), { start, end })
     );
+    if (groomerFilter !== 'all') {
+      list = list.filter((a) => a.groomerId === groomerFilter);
+    }
+    if (serviceFilter !== 'all') {
+      list = list.filter((a) => {
+        const svc = getService(a.serviceId);
+        return svc?.category === serviceFilter;
+      });
+    }
     if (statusFilter !== 'all') {
       list = list.filter((a) => a.status === statusFilter);
     }
@@ -792,7 +963,7 @@ export default function AppointmentList() {
       });
     }
     return list.sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
-  }, [appointments, statusFilter, search]);
+  }, [appointments, groomerFilter, serviceFilter, statusFilter, search, getService, getMember, getPet]);
 
   const goPrev = () => {
     if (viewMode === 'month') setCursor(subMonths(cursor, 1));
@@ -923,7 +1094,78 @@ export default function AppointmentList() {
                 ))}
               </div>
             </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+                <select
+                  value={groomerFilter}
+                  onChange={(e) => setGroomerFilter(e.target.value)}
+                  className="appearance-none rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-8 pr-9 text-sm text-sage-700 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+                >
+                  <option value="all">全部美容师</option>
+                  {activeGroomers.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+                <ChevronRight size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-sage-400" />
+              </div>
+
+              <div className="relative">
+                <Scissors size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+                <select
+                  value={serviceFilter}
+                  onChange={(e) => setServiceFilter(e.target.value as ServiceCategory | 'all')}
+                  className="appearance-none rounded-xl2 border border-cream-200 bg-cream-50/50 py-2 pl-8 pr-9 text-sm text-sage-700 transition-colors focus:border-sage-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sage-100"
+                >
+                  <option value="all">全部服务</option>
+                  {serviceCategoryOptions.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <ChevronRight size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-sage-400" />
+              </div>
+            </div>
           </div>
+
+          {(groomerFilter !== 'all' || serviceFilter !== 'all') && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 pt-3 border-t border-cream-100">
+              <span className="text-xs text-sage-500">当前筛选：</span>
+              {groomerFilter !== 'all' && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-sage-100 px-3 py-1 text-xs font-medium text-sage-700">
+                  💇 {getGroomer(groomerFilter)?.name}
+                  <button
+                    onClick={() => setGroomerFilter('all')}
+                    className="ml-1 text-sage-500 hover:text-sage-700 transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+              {serviceFilter !== 'all' && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-sky2-100 px-3 py-1 text-xs font-medium text-sky2-700">
+                  ✂️ {serviceFilter}
+                  <button
+                    onClick={() => setServiceFilter('all')}
+                    className="ml-1 text-sky2-500 hover:text-sky2-700 transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              )}
+              {(groomerFilter !== 'all' || serviceFilter !== 'all') && (
+                <button
+                  onClick={() => {
+                    setGroomerFilter('all');
+                    setServiceFilter('all');
+                  }}
+                  className="ml-auto text-xs text-sage-500 hover:text-sage-700 font-medium transition-colors"
+                >
+                  清除全部筛选
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {conflictDays.size > 0 && (
@@ -943,6 +1185,48 @@ export default function AppointmentList() {
         )}
 
         <div className="rounded-2xl2 bg-white p-5 shadow-soft">
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-sage-500 mr-1">美容师快速筛选：</span>
+            <button
+              onClick={() => setGroomerFilter('all')}
+              className={cn(
+                'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all',
+                groomerFilter === 'all'
+                  ? 'bg-sage-500 text-white shadow-sm'
+                  : 'bg-cream-100 text-sage-500 hover:bg-cream-200'
+              )}
+            >
+              全部
+            </button>
+            {activeGroomers.map((g) => {
+              const selected = groomerFilter === g.id;
+              const unselected = groomerFilter !== 'all' && !selected;
+              return (
+                <button
+                  key={g.id}
+                  onClick={() => setGroomerFilter(selected ? 'all' : g.id)}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full px-2 py-1 transition-all',
+                    selected
+                      ? 'bg-sage-50 ring-2 ring-sage-400 shadow-sm'
+                      : unselected
+                        ? 'opacity-50 hover:opacity-80'
+                        : 'hover:bg-cream-50'
+                  )}
+                  title={g.name}
+                >
+                  <Avatar name={g.name} className="w-7 h-7 text-xs" />
+                  <span className={cn(
+                    'text-xs font-medium',
+                    selected ? 'text-sage-700' : unselected ? 'text-sage-400' : 'text-sage-600'
+                  )}>
+                    {g.name.charAt(g.name.length - 1)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           {viewMode === 'day' ? (
             <DayView
               day={calendarRange[0]}
@@ -1228,6 +1512,7 @@ export default function AppointmentList() {
             pets={pets}
             onClose={() => setCompleteModal(null)}
             completeAppointment={completeAppointment}
+            createFollowUp={createFollowUp}
             showToast={showToast}
           />
         )}
